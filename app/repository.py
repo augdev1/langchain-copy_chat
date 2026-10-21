@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MessageHistory, User
+from app.models import AuditLog, MessageHistory, User
 
 
 class UserRepository:
@@ -106,5 +106,70 @@ class UserRepository:
             .order_by(MessageHistory.created_at.asc())
             .limit(limit)
         )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
+class AuditRepository:
+    """Async repository layer managing immutable audit logs."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def log_event(
+        self,
+        event_type: str,
+        phone_number: str,
+        *,
+        user_id: Optional[uuid.UUID] = None,
+        step_from: Optional[str] = None,
+        step_to: Optional[str] = None,
+        format_type: Optional[str] = None,
+        sub_intent: Optional[str] = None,
+        execution_time_ms: Optional[float] = None,
+        status: str = "SUCCESS",
+        payload: Optional[dict] = None,
+        created_at: Optional[datetime] = None,
+    ) -> AuditLog:
+        """Create and flush an audit record."""
+        now = created_at or datetime.now()
+        log_entry = AuditLog(
+            id=uuid.uuid4(),
+            event_type=event_type,
+            phone_number=phone_number,
+            user_id=user_id,
+            step_from=step_from,
+            step_to=step_to,
+            format_type=format_type,
+            sub_intent=sub_intent,
+            execution_time_ms=execution_time_ms,
+            status=status,
+            payload=payload,
+            created_at=now,
+        )
+        self.session.add(log_entry)
+        await self.session.flush()
+        return log_entry
+
+    async def query_logs(
+        self,
+        *,
+        phone_number: Optional[str] = None,
+        event_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[AuditLog]:
+        """Fetch audit records with optional filters."""
+        stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+        if phone_number:
+            clean = phone_number.strip()
+            stmt = stmt.where(
+                (AuditLog.phone_number == clean)
+                | (AuditLog.phone_number == f"+{clean}")
+                | (AuditLog.phone_number == clean.lstrip("+"))
+            )
+        if event_type:
+            stmt = stmt.where(AuditLog.event_type == event_type)
+        stmt = stmt.limit(limit).offset(offset)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

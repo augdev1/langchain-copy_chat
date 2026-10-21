@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Uuid, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -162,4 +162,71 @@ class KnowledgeChunk(Base):
         default=func.now(),
         nullable=False,
     )
+
+
+class AuditLog(Base):
+    """Immutable audit trail logging conversational events, state transitions, RAG retrieval and errors."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    phone_number: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    step_from: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    step_to: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    format_type: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    sub_intent: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    execution_time_ms: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="SUCCESS",
+        nullable=False,
+    )
+    payload: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+
+Index("ix_audit_logs_phone_created", AuditLog.phone_number, AuditLog.created_at.desc())
+
 

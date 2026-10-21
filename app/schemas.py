@@ -5,7 +5,7 @@ from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FormatType(str, Enum):
@@ -43,6 +43,38 @@ class WebhookResponse(BaseModel):
     user_id: Optional[uuid.UUID] = Field(None, description="User UUID")
     format_type: Optional[str] = Field(None, description="Active copy format if selected")
     sub_intent: Optional[str] = Field(None, description="Sub-intent / objective if selected")
+
+
+class AuditEventType(str, Enum):
+    INBOUND_MESSAGE = "INBOUND_MESSAGE"
+    DEDUP_BLOCKED = "DEDUP_BLOCKED"
+    LOCK_CONTENTION = "LOCK_CONTENTION"
+    ONBOARDING_COMPLETED = "ONBOARDING_COMPLETED"
+    STATE_TRANSITION = "STATE_TRANSITION"
+    SMART_INTENT_BYPASS = "SMART_INTENT_BYPASS"
+    RAG_RETRIEVAL = "RAG_RETRIEVAL"
+    COPY_GENERATED = "COPY_GENERATED"
+    OUTBOUND_DISPATCH = "OUTBOUND_DISPATCH"
+    ERROR = "ERROR"
+
+
+class AuditLogResponse(BaseModel):
+    """Schema for audited system events."""
+
+    id: uuid.UUID
+    event_type: str
+    phone_number: str
+    user_id: Optional[uuid.UUID] = None
+    step_from: Optional[str] = None
+    step_to: Optional[str] = None
+    format_type: Optional[str] = None
+    sub_intent: Optional[str] = None
+    execution_time_ms: Optional[float] = None
+    status: str
+    payload: Optional[dict] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentState(TypedDict, total=False):

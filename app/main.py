@@ -1,14 +1,18 @@
 import logging
+import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from logging.handlers import RotatingFileHandler
+from typing import AsyncGenerator, List, Optional
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage
 from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -23,12 +27,32 @@ from app.database import (
     redis_client,
 )
 from app.graph import build_copy_graph
+from app.models import AuditLog
 from app.rag import format_rag_context, retrieve_relevant_knowledge
-from app.repository import UserRepository
-from app.schemas import AgentState, WebhookEvent, WebhookResponse
+from app.repository import AuditRepository, UserRepository
+from app.schemas import (
+    AgentState,
+    AuditEventType,
+    AuditLogResponse,
+    WebhookEvent,
+    WebhookResponse,
+)
+
+# Structured rotating file logger for audit trail
+os.makedirs("logs", exist_ok=True)
+audit_handler = RotatingFileHandler(
+    "logs/audit.log",
+    maxBytes=10 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
+audit_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] [AUDIT] %(message)s")
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.addHandler(audit_handler)
 
 settings = get_settings()
 
@@ -98,14 +122,23 @@ async def process_webhook_message(
     4. Persists transitions and message history to PostgreSQL and warms session cache.
     5. Releases lock and outputs standardized response.
     """
+    start_time = time.perf_counter()
     dedup = EventDeduplicator(redis, ttl_seconds=settings.REDIS_DEDUP_TTL_SECONDS)
     session_cache = SessionCache(redis, ttl_seconds=settings.REDIS_SESSION_CACHE_TTL_SECONDS)
     repo = UserRepository(db)
+    audit_repo = AuditRepository(db)
 
     # 1. Event Deduplication
     is_dup = await dedup.is_duplicate(event.message_id)
     if is_dup:
         logger.warning("Duplicate event detected: %s. Skipping with HTTP 200.", event.message_id)
+        await audit_repo.log_event(
+            event_type=AuditEventType.DEDUP_BLOCKED.value,
+            phone_number=event.sender_id,
+            status="IGNORED",
+            payload={"message_id": event.message_id},
+        )
+        await db.commit()
         return WebhookResponse(
             status="ignored",
             reason="duplicate_event",
@@ -150,6 +183,17 @@ async def process_webhook_message(
                 )
                 if chunks:
                     rag_context = format_rag_context(chunks)
+                    await audit_repo.log_event(
+                        event_type=AuditEventType.RAG_RETRIEVAL.value,
+                        phone_number=event.sender_id,
+                        user_id=user.id,
+                        format_type=effective_format,
+                        payload={
+                            "query": event.message_text,
+                            "chunks_count": len(chunks),
+                            "chunk_titles": [c.title for c in chunks],
+                        },
+                    )
 
             # Assemble AgentState for LangGraph
             state: AgentState = {
@@ -180,6 +224,7 @@ async def process_webhook_message(
             new_format = output_state.get("format_type", effective_format)
             new_brand_handle = output_state.get("brand_handle", user.brand_handle)
             new_sub_intent = output_state.get("sub_intent", user.sub_intent)
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
             # 5. Persist updated user state and message logs to PostgreSQL
             await repo.update_user(
@@ -213,6 +258,33 @@ async def process_webhook_message(
                     created_at=event.timestamp,
                 )
 
+            # 6. Audit Logging: determine transition event type and record
+            if effective_step == "ASK_ONBOARDING" and new_step == "CHOOSE_FORMAT":
+                audit_type = AuditEventType.ONBOARDING_COMPLETED.value
+            elif new_step == "COPY_REFINEMENT":
+                audit_type = AuditEventType.COPY_GENERATED.value
+            else:
+                audit_type = AuditEventType.STATE_TRANSITION.value
+
+            await audit_repo.log_event(
+                event_type=audit_type,
+                phone_number=event.sender_id,
+                user_id=user.id,
+                step_from=effective_step,
+                step_to=new_step,
+                format_type=new_format,
+                sub_intent=new_sub_intent,
+                execution_time_ms=elapsed_ms,
+                status="SUCCESS",
+                payload={
+                    "input_text": event.message_text,
+                    "response_sample": response_text[:120] if response_text else None,
+                    "name": output_state.get("name"),
+                    "niche": output_state.get("niche"),
+                    "brand_handle": new_brand_handle,
+                },
+            )
+
             await db.commit()
 
             # Warm ephemeral session cache in Redis
@@ -230,6 +302,13 @@ async def process_webhook_message(
 
     except LockAcquisitionError as e:
         logger.warning("Lock contention for sender %s: %s", event.sender_id, e)
+        await audit_repo.log_event(
+            event_type=AuditEventType.LOCK_CONTENTION.value,
+            phone_number=event.sender_id,
+            status="BLOCKED",
+            payload={"error": str(e), "message_id": event.message_id},
+        )
+        await db.commit()
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={
@@ -334,13 +413,89 @@ async def process_evolution_webhook(
 
     if isinstance(response, WebhookResponse):
         if response.status == "success" and response.response_text:
-            await send_evolution_message(sender_id, response.response_text)
+            sent = await send_evolution_message(sender_id, response.response_text)
+            audit_repo = AuditRepository(db)
+            await audit_repo.log_event(
+                event_type=AuditEventType.OUTBOUND_DISPATCH.value,
+                phone_number=sender_id,
+                user_id=response.user_id,
+                format_type=response.format_type,
+                sub_intent=response.sub_intent,
+                status="SUCCESS" if sent else "ERROR",
+                payload={"response_length": len(response.response_text), "sent": sent},
+            )
+            await db.commit()
         return response
 
     if isinstance(response, JSONResponse) and response.status_code == 429:
         await send_evolution_message(
             sender_id,
-            "⚠️ Outra mensagem sua já está em processamento. Aguarde alguns instantes.",
+            "Outra mensagem sua já está em processamento. Aguarde alguns instantes.",
         )
 
     return response
+
+
+@app.get(
+    "/audit/logs",
+    response_model=List[AuditLogResponse],
+    status_code=status.HTTP_200_OK,
+    tags=["Audit & Compliance"],
+)
+async def get_audit_logs(
+    phone_number: Optional[str] = Query(None, description="Filtrar por número de telefone"),
+    event_type: Optional[str] = Query(None, description="Filtrar por tipo de evento"),
+    limit: int = Query(50, ge=1, le=500, description="Quantidade máxima de registros"),
+    offset: int = Query(0, ge=0, description="Deslocamento de paginação"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retorna logs imutáveis de auditoria com paginação e filtros opcionais.
+    """
+    audit_repo = AuditRepository(db)
+    logs = await audit_repo.query_logs(
+        phone_number=phone_number,
+        event_type=event_type,
+        limit=limit,
+        offset=offset,
+    )
+    return logs
+
+
+@app.get(
+    "/audit/stats",
+    status_code=status.HTTP_200_OK,
+    tags=["Audit & Compliance"],
+)
+async def get_audit_stats(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retorna estatísticas consolidadas da trilha de auditoria:
+    total de eventos, distribuição por tipo de evento e contagem por status.
+    """
+    total_events_query = select(func.count(AuditLog.id))
+    total_res = await db.execute(total_events_query)
+    total_events = total_res.scalar() or 0
+
+    by_type_query = (
+        select(AuditLog.event_type, func.count(AuditLog.id))
+        .group_by(AuditLog.event_type)
+    )
+    by_type_res = await db.execute(by_type_query)
+    by_type = {row[0]: row[1] for row in by_type_res.all()}
+
+    by_status_query = (
+        select(AuditLog.status, func.count(AuditLog.id))
+        .group_by(AuditLog.status)
+    )
+    by_status_res = await db.execute(by_status_query)
+    by_status = {row[0]: row[1] for row in by_status_res.all()}
+
+    return {
+        "total_audit_events": total_events,
+        "events_by_type": by_type,
+        "events_by_status": by_status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+

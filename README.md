@@ -130,6 +130,14 @@ stateDiagram-v2
 - **Webhook Adapter (`POST /webhook/evolution`)**: Processa eventos `MESSAGES_UPSERT`, filtra mensagens originadas pelo proprio bot (`fromMe: true`) e mensagens de grupos (`@g.us`).
 - **Envio Ativo de Mensagens**: Comunica com a Evolution API via `POST /message/sendText/{instance}` com suporte a QR Code e codigo de pareamento numerico de 8 digitos.
 
+### Trilha de Auditoria e Conformidade (Audit Trail)
+- **Persistencia Imutavel (`AuditLog`)**: Registro relacional em PostgreSQL de eventos criticos: `INBOUND_MESSAGE`, `DEDUP_BLOCKED`, `LOCK_CONTENTION`, `ONBOARDING_COMPLETED`, `STATE_TRANSITION`, `SMART_INTENT_BYPASS`, `RAG_RETRIEVAL`, `COPY_GENERATED`, `OUTBOUND_DISPATCH` e `ERROR`.
+- **Campos de Rastreabilidade**: Armazena identificador UUID, tipo de evento, telefone do remetente, etapas de transicao (`step_from` -> `step_to`), latencia de execucao (`execution_time_ms`), status e payload JSON estruturado.
+- **Arquivo Rotativo (`logs/audit.log`)**: Rotacao automatica com `RotatingFileHandler` (limite de 10 MB por arquivo, retencao de 5 backups).
+- **Endpoints de Auditoria**:
+  - `GET /audit/logs`: Consulta paginada com filtros por `phone_number` e `event_type`.
+  - `GET /audit/stats`: Consolidacao volumetrica de eventos por tipo e status.
+
 ---
 
 ## Estrutura do Repositorio
@@ -145,9 +153,9 @@ stateDiagram-v2
 |   |-- database.py             # Conexoes assincronas SQLAlchemy, Redis, Locks e Cache
 |   |-- graph.py                # Definicao do StateGraph, rotas e nos do LangGraph
 |   |-- main.py                 # Endpoints FastAPI e adaptadores de webhook
-|   |-- models.py               # Modelos relacionais e vetoriais (User, MessageHistory, KnowledgeChunk)
+|   |-- models.py               # Modelos relacionais e vetoriais (User, MessageHistory, KnowledgeChunk, AuditLog)
 |   |-- rag.py                  # Busca semantica vetorial e formatacao de contexto
-|   |-- repository.py           # Camada de acesso a dados assincrona
+|   |-- repository.py           # Camada de acesso a dados assincrona (UserRepository, AuditRepository)
 |   `-- schemas.py              # Contratos Pydantic e tipo AgentState
 |-- knowledge_base/             # Base de conhecimento de copy (.md, .txt, .pdf, .docx)
 |   |-- Narrativas dermatos.docx
@@ -186,6 +194,7 @@ Cenarios cobertos:
 7. `test_copy_generation_prompt_injection`: Validacao de injecao de parametros no prompt final.
 8. `test_evolution_webhook_adapter`: Filtragem de eventos de grupo, mensagens proprias e integracao outbound.
 9. `test_rag_semantic_knowledge_injection`: Recuperacao semantica e injecao de contexto documental no prompt.
+10. `test_audit_trail_logging_and_endpoints`: Persistencia de eventos imutaveis, consulta paginada e agregacao estatistica.
 
 ---
 

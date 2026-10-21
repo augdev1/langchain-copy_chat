@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.database import Base, get_db, get_redis
 from app.graph import build_copy_graph
 from app.main import app, get_compiled_graph
-from app.models import MessageHistory, User
+from app.models import AuditLog, MessageHistory, User
 from app.repository import UserRepository
-from app.schemas import FormatType, StepName
+from app.schemas import AuditEventType, FormatType, StepName
 
 
 # -------------------------------------------------------------------------
@@ -607,6 +607,83 @@ async def test_rag_semantic_knowledge_injection(
     assert data["status"] == "success"
     assert data["current_step"] == StepName.COPY_REFINEMENT.value
     assert data["format_type"] == FormatType.STORIES.value
+
+
+@pytest.mark.asyncio
+async def test_audit_trail_logging_and_endpoints(client: AsyncClient, session_factory):
+    """
+    Verifies that state transitions, dedup triggers, and executions generate
+    immutable audit entries in PostgreSQL/SQLite and are queryable via
+    /audit/logs and /audit/stats.
+    """
+    phone = "+5511988887777"
+    t = "2026-10-21T12:00:00Z"
+
+    # 1. Trigger ONBOARDING_COMPLETED audit event
+    resp1 = await client.post(
+        "/webhook/message",
+        json={
+            "message_id": "audit_msg_1",
+            "sender_id": phone,
+            "message_text": "Juliana, Dermatologia Estética, @dra.juliana",
+            "timestamp": t,
+        },
+    )
+    assert resp1.status_code == 200
+
+    # 2. Trigger STATE_TRANSITION audit event
+    resp2 = await client.post(
+        "/webhook/message",
+        json={
+            "message_id": "audit_msg_2",
+            "sender_id": phone,
+            "message_text": "1",
+            "timestamp": t,
+        },
+    )
+    assert resp2.status_code == 200
+
+    # 3. Trigger DEDUP_BLOCKED audit event (send same message_id)
+    resp3 = await client.post(
+        "/webhook/message",
+        json={
+            "message_id": "audit_msg_2",
+            "sender_id": phone,
+            "message_text": "1",
+            "timestamp": t,
+        },
+    )
+    assert resp3.status_code == 200
+    assert resp3.json()["status"] == "ignored"
+
+    # 4. Query /audit/logs
+    logs_resp = await client.get("/audit/logs", params={"phone_number": phone})
+    assert logs_resp.status_code == 200
+    logs = logs_resp.json()
+    assert len(logs) >= 3
+
+    event_types = [entry["event_type"] for entry in logs]
+    assert AuditEventType.ONBOARDING_COMPLETED.value in event_types
+    assert AuditEventType.STATE_TRANSITION.value in event_types
+    assert AuditEventType.DEDUP_BLOCKED.value in event_types
+
+    # Verify structured fields
+    onboarding_event = next(e for e in logs if e["event_type"] == AuditEventType.ONBOARDING_COMPLETED.value)
+    assert onboarding_event["phone_number"] == phone
+    assert onboarding_event["status"] == "SUCCESS"
+    assert onboarding_event["step_from"] == "ASK_ONBOARDING"
+    assert onboarding_event["step_to"] == "CHOOSE_FORMAT"
+    assert onboarding_event["payload"]["name"] == "Juliana"
+
+    # 5. Query /audit/stats
+    stats_resp = await client.get("/audit/stats")
+    assert stats_resp.status_code == 200
+    stats = stats_resp.json()
+    assert stats["total_audit_events"] >= 3
+    assert AuditEventType.ONBOARDING_COMPLETED.value in stats["events_by_type"]
+    assert "SUCCESS" in stats["events_by_status"]
+    assert "IGNORED" in stats["events_by_status"]
+
 
 
 

@@ -18,3 +18,8 @@ wheels/
 # WhatsApp QR Code
 qrcode.png
 
+# Application logs
+logs/
+*.log
+
+
