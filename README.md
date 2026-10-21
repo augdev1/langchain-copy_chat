@@ -1,160 +1,235 @@
-# Core de Bot de Copywriting de Alta Conversão (WhatsApp / Telegram)
+# Copywriting Assistant Engine
 
-Arquitetura de microsserviço de alta performance para chatbots de copywriting persuasivo, construído com **FastAPI**, **LangChain / LangGraph**, **PostgreSQL** (SQLAlchemy 2.0 Async), **Redis** (Lock distribuído, Deduplicação e Cache efêmero) e **Google Gemini API**, acompanhado por um **Test Harness** 100% determinístico e automatizado.
+Microsserviço assíncrono para automação de copywriting persuasivo multicanal (WhatsApp e interfaces HTTP). O sistema integra orquestração de estados com LangGraph, recuperação semântica RAG sobre PostgreSQL com pgvector, controle transacional e de concorrência com Redis, e geração de conteúdo via Google Gemini API.
 
 ---
 
-## 🏛️ Visão Geral da Arquitetura
+## Arquitetura do Sistema
+
+### 1. Diagrama de Fluxo e Componentes
 
 ```mermaid
 flowchart TD
-    WH["Webhook Inbound (WhatsApp / Telegram)"] --> API["FastAPI POST /webhook/message"]
-    API --> DEDUP{"Redis Dedup\nmessage_id (TTL 5m)"}
-    DEDUP -- "Duplicado" --> IGNORE["HTTP 200 (status: ignored)"]
-    DEDUP -- "Novo Evento" --> LOCK{"Distributed Lock\nlock:user:{phone_number}"}
-    LOCK -- "Bloqueado / Concorrente" --> BUSY["HTTP 429 (status: busy)"]
-    LOCK -- "Lock Adquirido" --> CACHE["Verifica Session Cache no Redis"]
-    CACHE --> DB_LOAD["Carrega ou Cria Usuário no PostgreSQL"]
-    DB_LOAD --> GRAPH["LangGraph State Machine (StateGraph)"]
-
-    subgraph LangGraph ["LangGraph State Machine"]
-        START["eval_daily_trigger"] --> ROUTE{"Novo Dia & Onboarded?"}
-        ROUTE -- "Sim" --> PROMPT_DAILY["Menu Diário: Stories / Reels / Feed"]
-        ROUTE -- "Não" --> STEP{"Avalia current_step"}
-        STEP -- "ASK_NAME / ASK_PROFESSION / ASK_NICHE" --> ONBOARDING["Nó de Onboarding (Validação Fechada)"]
-        STEP -- "CHOOSE_FORMAT" --> FORMAT_SELECT["Nó de Seleção de Formato"]
-        STEP -- "AWAITING_COPY_BRIEF / GENERATE_COPY" --> COPY_GEN["Nó de Geração de Copy (Google Gemini)"]
+    subgraph Client ["Camada de Entrada"]
+        WA["WhatsApp (Evolution API)"]
+        HTTP["Webhook HTTP Externo"]
     end
 
-    GRAPH --> DB_SAVE["Persiste Usuário & MessageHistory no PostgreSQL"]
-    DB_SAVE --> CACHE_SET["Atualiza Cache de Sessão no Redis"]
-    CACHE_SET --> UNLOCK["Libera Distributed Lock"]
-    UNLOCK --> RESP["HTTP 200 (WebhookResponse)"]
+    subgraph Gateway ["Protecao e Concorrencia (Redis 7)"]
+        DEDUP["Event Deduplication\n(SET NX, TTL 5m)"]
+        LOCK["Distributed Lock\n(Atomic by Phone)"]
+        CACHE["Session Cache\n(Current Step & Format)"]
+    end
+
+    subgraph Core ["Orquestracao (FastAPI + LangGraph)"]
+        API["FastAPI Inbound Router\n/webhook/evolution\n/webhook/message"]
+        GRAPH["LangGraph State Machine\n(AgentState)"]
+        RAG["RAG Engine\n(Cosine Similarity Search)"]
+    end
+
+    subgraph Storage ["Persistencia e Modelos (PostgreSQL 16 + Gemini)"]
+        PG_DB["PostgreSQL\n(Users, MessageHistory)"]
+        PG_VEC["PostgreSQL pgvector\n(KnowledgeChunks 768d)"]
+        GEMINI_EMBED["Gemini Embedding 001\n(Vector Dimensions: 768)"]
+        GEMINI_LLM["Gemini 2.5 Flash\n(Chat Completion)"]
+    end
+
+    WA --> API
+    HTTP --> API
+    API --> DEDUP
+    DEDUP -- "Idempotencia (Duplicado)" --> RET_DUP["HTTP 200 (Ignorado)"]
+    DEDUP -- "Novo Evento" --> LOCK
+    LOCK -- "Contencao de Concorrencia" --> RET_BUSY["HTTP 429 (Busy)"]
+    LOCK -- "Lock Adquirido" --> CACHE
+    CACHE --> GRAPH
+    GRAPH --> RAG
+    RAG --> GEMINI_EMBED
+    RAG --> PG_VEC
+    GRAPH --> GEMINI_LLM
+    GRAPH --> PG_DB
+    GRAPH --> LOCK
+    GRAPH --> WA
+```
+
+### 2. Maquina de Estados do Bot (LangGraph)
+
+```mermaid
+stateDiagram-v2
+    [*] --> AvaliacaoTemporal
+
+    state AvaliacaoTemporal {
+        VerificaData: Compara last_interaction_at com data atual
+    }
+
+    AvaliacaoTemporal --> Onboarding: Usuario novo ou incompleto
+    AvaliacaoTemporal --> Etapa1_SelecaoFormato: Novo dia (Reset Diario)
+    AvaliacaoTemporal --> Etapa2_Refinamento: Mesmo dia (Fluxo em andamento)
+
+    state Onboarding {
+        PerguntaUnica: Coleta Nome, Segmento/Nicho e @ da Marca
+        ProcessamentoRegex: Extrai entidades e atualiza perfil
+    }
+    Onboarding --> Etapa1_SelecaoFormato: Perfil configurado
+
+    state Etapa1_SelecaoFormato {
+        Opcao1: 1. Stories
+        Opcao2: 2. Reels
+        Opcao3: 3. Feed
+        Opcao4: 4. WhatsApp Leads
+        SmartIntent: Deteccao de intencao explicita no texto
+    }
+    Etapa1_SelecaoFormato --> Etapa2_Refinamento: Escolha numerica (1 a 4)
+    Etapa1_SelecaoFormato --> GeracaoCopy: Smart Intent detectado (Bypass)
+
+    state Etapa2_Refinamento {
+        SubIntencao: Venda vs Conexao vs Fechamento vs Formato
+    }
+    Etapa2_Refinamento --> AguardandoBriefing: Sub-intencao definida
+
+    state AguardandoBriefing {
+        RecebeBriefing: Coleta tema ou produto
+    }
+    AguardandoBriefing --> GeracaoCopy: Submissao do briefing
+
+    state GeracaoCopy {
+        ConsultaRAG: Busca vetorial por cosseno (pgvector)
+        InjecaoPrompt: Montagem de prompt com Playbook + Metadados
+        ChamadaLLM: Gemini 2.5 Flash gera copy estruturada
+    }
+    GeracaoCopy --> RefinamentoCopy: Copy gerada com sucesso
+
+    state RefinamentoCopy {
+        Ajustes: Modificacao de tom, CTA ou tamanho
+        NovoConteudo: Comando MENU reinicia o ciclo
+    }
+    RefinamentoCopy --> [*]
 ```
 
 ---
 
-## 🚀 Camadas do Sistema
+## Modulos e Tecnologias
 
-### 1. Concorrência e Deduplicação (Redis)
-- **Deduplicação de Eventos (`EventDeduplicator`)**:
-  - Armazena a chave `dedup:msg:{message_id}` com TTL de 5 minutos utilizando comando atômico `SET NX EX`.
-  - Se um webhook reenviar a mesma mensagem (política de retry de mensageria), o sistema ignora o reprocessamento imediatamente com HTTP 200 e payload `{ status: "ignored", reason: "duplicate_event" }`.
-- **Lock Distribuído (`DistributedLock`)**:
-  - Lock atômico por `phone_number` com lease timeout de 10s e timeout de bloqueio de 2s.
-  - Impede race conditions causadas por múltiplos cliques rápidos ou rajadas de mensagens no WhatsApp, respondendo com HTTP 429 controlado (`status: busy, reason: lock_contention`).
-- **Cache de Sessão Efêmero (`SessionCache`)**:
-  - Chaves `session:step:{phone}` e `session:format:{phone}` com TTL de 30 minutos, acelerando leituras ativas sem sobrecarregar o PostgreSQL.
+### Concorrencia e Idempotencia (Redis)
+- **Deduplicacao de Eventos (`EventDeduplicator`)**: Valida o identificador `message_id` utilizando `SET NX EX` com TTL de 5 minutos. Mensagens duplicadas provenientes de retentativas de webhook sao descartadas com status HTTP 200 `{ "status": "ignored", "reason": "duplicate_event" }`.
+- **Lock Distribuido (`DistributedLock`)**: Impede condicoes de corrida causadas por mensagens simultaneas do mesmo remetente. Utiliza chave `lock:user:{phone_number}` com lease timeout de 10 segundos e timeout de bloqueio de 2 segundos. Em caso de colisao, responde com HTTP 429 `{ "status": "busy", "reason": "lock_contention" }`.
+- **Cache de Sessao Efemero (`SessionCache`)**: Mantem em memoria o estado operacional do usuario (`current_step` e `format_type`) com TTL de 30 minutos para reduzir a carga de leitura no PostgreSQL.
 
-### 2. Máquina de Estados Finita e Orquestração (LangGraph)
-- **`AgentState` Tipado**: Mantém `user_id`, `phone_number`, `name`, `profession`, `niche`, `current_step`, `format_type`, `last_interaction_at`, `messages`, etc.
-- **Onboarding Determinístico com Validação Fechada**:
-  - Passo 1: Nome do usuário.
-  - Passo 2: Profissão / Atuação.
-  - Passo 3: Menu fechado de nichos (1 a 5). Se o input for inválido, o nó **não transita de estado** e devolve erro controlado.
-- **Nó Temporal (`eval_daily_trigger`)**:
-  - Compara `last_interaction_at::date` com a data do evento recebido.
-  - Se for um novo dia e o onboarding estiver concluído, transita obrigatoriamente para a seleção de formato ("O que quer criar hoje? 1. Stories, 2. Reels, 3. Feed").
-  - Se for no mesmo dia, preserva e continua o fluxo de criação/refinamento de copy.
-- **Nó de Copywriting de Alta Conversão (`generate_copy`)**:
-  - Injeta obrigatoriamente `{name}`, `{profession}`, `{niche}` e `{format_type}` em prompt especializado de resposta direta (AIDA/PAS, ganchos magnéticos, quebra de objeções e CTA).
-  - Executa chamada assíncrona ao Google Gemini (`ChatGoogleGenerativeAI`) ou mock nos testes.
+### Maquina de Estados (LangGraph)
+- **Estado Tipado (`AgentState`)**: Estrutura com validacao contendo identificador do usuario, numero de telefone, perfil de atuacao, @ da marca, etapa atual, formato, sub-intencao, timestamps e contexto RAG recuperado.
+- **Onboarding em Etapa Unica**: Coleta nome, nicho e @ da marca em uma unica mensagem via parser com expressoes regulares, eliminando a friccao de formularios sequenciais.
+- **Deteccao Inteligente de Intencao (Smart Intent Bypass)**: Analisa mensagens com explicacoes livres (ex: *"Quero um carrossel para o feed sobre harmonizacao"*), mapeia automaticamente formato e objetivo, e pula a Etapa 2 diretamente para a geracao.
+- **Gatilho Temporal (`eval_daily_trigger`)**: Reinicia o menu principal para usuarios recorrentes em datas diferentes, preservando o contexto em interacoes no mesmo dia.
 
-### 3. Persistência Relacional & RAG Vetorial (PostgreSQL 16 + pgvector)
-- **Tabela `users`**: Armazena identidade (UUID PK), telefone com índice único, dados cadastrais, `current_step`, `format_type` ativo, timestamps timezone-aware.
-- **Tabela `message_history`**: Log transacional de todas as mensagens (humano e assistente), vinculada por FK com índice composto `(user_id, created_at)`.
-- **Tabela `knowledge_chunks` (pgvector)**: Base de conhecimento de copywriting indexada com vetores de 768 dimensões gerados pela Google Gemini API (`models/gemini-embedding-001`), permitindo busca semântica por similaridade de cosseno com filtros de metadados (`niche` e `format_type`).
-- **Repositório Assíncrono (`UserRepository`) & Módulo RAG (`app/rag.py`)**: Isola completamente queries, buscas vetoriais e injeção contextual no prompt.
+### Recuperacao Semantica RAG (PostgreSQL 16 + pgvector)
+- **Tabela `knowledge_chunks`**: Armazena trechos textuais, metadados de nicho/formato e vetores de 768 dimensoes.
+- **Embeddings Vetoriais**: Gerados pelo modelo `models/gemini-embedding-001` da Google Gemini API com `output_dimensionality=768`.
+- **Busca por Distancia de Cosseno**: Executa consultas com o operador `<=>` nativo do pgvector, filtrando por nicho e formato com fallback gracioso.
+- **Pipeline de Ingestao (`scripts/ingest_knowledge.py`)**: Suporta documentos nos formatos `.md`, `.txt`, `.pdf` e `.docx` (Microsoft Word), segmentando em chunks semanticos de 1000 caracteres com overlap de 150 caracteres.
 
-### 4. Harness Engineering & Testes Automatizados (Pytest)
-- **Isolamento 100% Determinístico**:
-  - SQLite assíncrono in-memory (`sqlite+aiosqlite:///:memory:`) substitui o PostgreSQL nos testes (com suporte a colunas Vector sem dependência externa).
-  - `fakeredis` com suporte a scripts Lua substitui o Redis sem necessidade de container rodando.
-  - `FakeListChatModel` e `MockEmbeddings` interceptam e validam chamadas de LLM e Embeddings com zero tráfego de rede e custo zero de tokens.
-- **Bateria de Testes Cobrindo (8 testes)**:
-  1. Ciclo completo de onboarding até o estado de escolha de formato.
-  2. Rejeição de input inválido no menu fechado de nichos.
-  3. Simulação de mensagens no mesmo dia vs. dia subsequente (disparo do menu de formatos).
-  4. Validação de contenção do Distributed Lock do Redis contra concorrência.
-  5. Deduplicação idempotente de eventos de webhook repetidos.
-  6. Injeção de variáveis de perfil no prompt e geração da copy formatada.
-  7. Adaptador de webhook do Evolution API (WhatsApp) com filtro de mensagens do bot e grupos.
-  8. Busca semântica e injeção de contexto RAG da base de conhecimento no prompt.
+### Integracao WhatsApp (Evolution API)
+- **Webhook Adapter (`POST /webhook/evolution`)**: Processa eventos `MESSAGES_UPSERT`, filtra mensagens originadas pelo proprio bot (`fromMe: true`) e mensagens de grupos (`@g.us`).
+- **Envio Ativo de Mensagens**: Comunica com a Evolution API via `POST /message/sendText/{instance}` com suporte a QR Code e codigo de pareamento numerico de 8 digitos.
 
 ---
 
-## 📂 Estrutura de Arquivos
+## Estrutura do Repositorio
 
 ```
 .
-├── Dockerfile                  # Imagem de produção multi-stage otimizada com uv
-├── docker-compose.yml          # Orquestração: PostgreSQL 16 (pgvector), Redis 7, API e Evolution API
-├── pyproject.toml              # Dependências e configuração do pytest/asyncio
-├── .env.example                # Template de variáveis de ambiente
-├── app/
-│   ├── __init__.py
-│   ├── config.py               # Pydantic Settings para variáveis de ambiente
-│   ├── database.py             # Engine SQLAlchemy Async, pgvector, Redis, Lock, Dedup e SessionCache
-│   ├── models.py               # Modelos SQLAlchemy 2.0 (User, MessageHistory, KnowledgeChunk)
-│   ├── rag.py                  # Módulo RAG: busca semântica no pgvector e formatação de contexto
-│   ├── schemas.py              # Contratos Pydantic (WebhookEvent, WebhookResponse) e AgentState
-│   ├── repository.py           # Repositório assíncrono para usuários e mensagens
-│   ├── graph.py                # StateGraph LangGraph com injeção de RAG e prompt de alta conversão
-│   └── main.py                 # FastAPI: /webhook/message, /webhook/evolution e envio WhatsApp
-├── knowledge_base/             # Manuais, playbooks e frameworks de copy (.md, .txt, .pdf)
-│   ├── framework_stories_alta_conversao.md
-│   └── ganchos_e_objecoes_por_nicho.md
-├── scripts/
-│   ├── ingest_knowledge.py     # Ingestão de arquivos da knowledge_base no PostgreSQL pgvector
-│   └── setup_evolution.py      # Automação de criação de instância WhatsApp, webhook e QR Code
-└── tests/
-    └── test_harness.py         # Suíte de testes determinísticos automatizados (8 testes)
+|-- Dockerfile                  # Build multi-stage para producao com uv
+|-- docker-compose.yml          # Servicos: API, PostgreSQL pgvector, Redis e Evolution API
+|-- pyproject.toml              # Definicao de dependencias e configuracao de testes
+|-- .env.example                # Especificacao de variaveis de ambiente
+|-- app/
+|   |-- config.py               # Validacao de configuracoes com Pydantic Settings
+|   |-- database.py             # Conexoes assincronas SQLAlchemy, Redis, Locks e Cache
+|   |-- graph.py                # Definicao do StateGraph, rotas e nos do LangGraph
+|   |-- main.py                 # Endpoints FastAPI e adaptadores de webhook
+|   |-- models.py               # Modelos relacionais e vetoriais (User, MessageHistory, KnowledgeChunk)
+|   |-- rag.py                  # Busca semantica vetorial e formatacao de contexto
+|   |-- repository.py           # Camada de acesso a dados assincrona
+|   `-- schemas.py              # Contratos Pydantic e tipo AgentState
+|-- knowledge_base/             # Base de conhecimento de copy (.md, .txt, .pdf, .docx)
+|   |-- Narrativas dermatos.docx
+|   |-- framework_stories_alta_conversao.md
+|   `-- ganchos_e_objecoes_por_nicho.md
+|-- scripts/
+|   |-- ingest_knowledge.py     # Script de ingestao e vetorizacao RAG
+|   `-- setup_evolution.py      # Provisionamento da instancia WhatsApp e pareamento
+`-- tests/
+    `-- test_harness.py         # Suite deterministica de testes unitarios e de integracao
 ```
 
 ---
 
-## 🛠️ Como Executar
+## Harness Engineering e Validacao
 
-### 1. Clonar e Instalar Dependências (via `uv`)
-```bash
-# Sincronizar ambiente virtual
-uv sync
-```
+A suite de testes foi construida para garantir determinismo total, sem dependencia de servicos externos ou consumo de tokens em tempo de teste:
 
-### 2. Rodar a Bateria de Testes Automatizados (Harness Engineering)
+- **PostgreSQL**: Substituido por SQLite assincrono em memoria (`sqlite+aiosqlite:///:memory:`).
+- **Redis**: Substituido por `fakeredis` com emulacao de scripts Lua e travas distribuidas.
+- **Gemini LLM & Embeddings**: Substituidos por `FakeListChatModel` e `MockEmbeddings`.
+
+### Execucao dos Testes
+
 ```bash
 uv run pytest -v
 ```
 
-Saída esperada:
-```
-tests/test_harness.py::test_full_onboarding_cycle PASSED                 [ 12%]
-tests/test_harness.py::test_niche_invalid_input_rejection PASSED         [ 25%]
-tests/test_harness.py::test_same_day_vs_subsequent_day_temporal_trigger PASSED [ 37%]
-tests/test_harness.py::test_redis_distributed_lock_concurrency PASSED    [ 50%]
-tests/test_harness.py::test_redis_event_deduplication PASSED             [ 62%]
-tests/test_harness.py::test_copy_generation_prompt_injection PASSED      [ 75%]
-tests/test_harness.py::test_evolution_webhook_adapter PASSED             [ 87%]
-tests/test_harness.py::test_rag_semantic_knowledge_injection PASSED      [100%]
-============================== 8 passed in 5.69s ==============================
+Cenarios cobertos:
+1. `test_full_onboarding_cycle`: Validacao de transicao de estado no onboarding em etapa unica.
+2. `test_format_invalid_input_rejection`: Tratamento de opcoes invalidas no menu de formatos.
+3. `test_smart_intent_skip_etapa2`: Bypass automatico da Etapa 2 em mensagens com intencao detalhada.
+4. `test_same_day_vs_subsequent_day_temporal_trigger`: Diferenciacao de mensagens no mesmo dia vs novo dia.
+5. `test_redis_distributed_lock_concurrency`: Rejeicao por lock distribuido (HTTP 429) em rajadas de requisicoes.
+6. `test_redis_event_deduplication`: Idempotencia de webhooks repetidos com mesmo `message_id`.
+7. `test_copy_generation_prompt_injection`: Validacao de injecao de parametros no prompt final.
+8. `test_evolution_webhook_adapter`: Filtragem de eventos de grupo, mensagens proprias e integracao outbound.
+9. `test_rag_semantic_knowledge_injection`: Recuperacao semantica e injecao de contexto documental no prompt.
+
+---
+
+## Instrucoes de Execucao
+
+### 1. Configuracao do Ambiente
+
+Copie o arquivo de exemplo e configure as variaveis:
+
+```bash
+cp .env.example .env
 ```
 
-### 3. Subir com Docker Compose (PostgreSQL com pgvector + Redis + API + Evolution API)
+Variaveis obrigatorias:
+- `GEMINI_API_KEY`: Chave da API do Google Gemini.
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`: Credenciais do banco relacional.
+- `EVOLUTION_API_KEY`: Chave de autenticacao interna da Evolution API.
+
+### 2. Inicializacao dos Servicos (Docker Compose)
+
+Inicie todos os servicos (PostgreSQL pgvector, Redis 7, FastAPI e Evolution API):
+
 ```bash
-# Subir infraestrutura completa em segundo plano
 docker compose up -d --build
 ```
 
-### 4. Ingestão de Documentos na Base de Conhecimento RAG
-Para indexar os playbooks e materiais de copy enviados pela sua equipe na pasta `knowledge_base/`:
+### 3. Ingestao da Base de Conhecimento RAG
+
+Indexe os manuais, playbooks e documentos presentes na pasta `knowledge_base/`:
+
 ```bash
 uv run python scripts/ingest_knowledge.py
 ```
 
-### 5. Conectar seu WhatsApp (100% Gratuito via Evolution API)
-Execute o script utilitário para provisionar a instância, registrar o webhook interno e gerar o QR Code:
+### 4. Pareamento com WhatsApp
+
+Execute o utilitario de conexao:
+
 ```bash
+# Modo 1: Geracao de QR Code (salvo em qrcode.png)
 uv run python scripts/setup_evolution.py
+
+# Modo 2: Codigo de pareamento numerico de 8 digitos por telefone
+uv run python scripts/setup_evolution.py 5511999998888
 ```
-A imagem `qrcode.png` será gerada na raiz do projeto. Basta abrir o WhatsApp no seu smartphone e escanear em:
-`Aparelhos conectados > Conectar um aparelho`.
+
+Ao concluir o pareamento, o status da instancia mudara para `open`, e qualquer mensagem enviada ao numero acionara o fluxo completo.
