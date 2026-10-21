@@ -1,0 +1,45 @@
+[project]
+name = "langchain-chat-copy"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "augdev1", email = "augustosousa1798@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "asyncpg>=0.32.0",
+    "fakeredis[lua]>=2.20",
+    "fastapi>=0.157.0",
+    "greenlet>=3.5.6",
+    "httpx>=0.28.1",
+    "langchain>=1.4.6",
+    "langchain-core>=1.6.12",
+    "langchain-google-genai>=4.4.2",
+    "langchain-text-splitters>=1.1.3",
+    "langgraph>=1.2.16",
+    "pgvector>=0.5.1",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.1",
+    "pypdf>=6.21.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "redis>=5.0",
+    "sqlalchemy>=2.0",
+    "uvicorn>=0.54.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+
