@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     GEMINI_API_KEY: str = "mock-api-key"
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
 
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"

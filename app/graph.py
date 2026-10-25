@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 import re
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional, Tuple
@@ -13,6 +14,55 @@ from app.schemas import AgentState, FormatType, StepName
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+_CACHED_MASTER_PROMPT: Optional[str] = None
+
+
+def get_master_prompt() -> str:
+    """Loads the master Neurocopy prompt from knowledge_base folder."""
+    global _CACHED_MASTER_PROMPT
+    if _CACHED_MASTER_PROMPT is not None:
+        return _CACHED_MASTER_PROMPT
+
+    knowledge_dir = Path(__file__).resolve().parent.parent / "knowledge_base"
+    candidates = [
+        knowledge_dir / "Prompt mãe.md",
+        knowledge_dir / "Prompt mae.md",
+        knowledge_dir / "prompt_mae.md",
+        knowledge_dir / "prompt_mae.txt",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            try:
+                content = candidate.read_text(encoding="utf-8").strip()
+                if content:
+                    _CACHED_MASTER_PROMPT = content
+                    logger.info(
+                        "Successfully loaded Master Neurocopy Prompt from %s (%d chars)",
+                        candidate.name,
+                        len(content),
+                    )
+                    return _CACHED_MASTER_PROMPT
+            except Exception as e:
+                logger.warning("Error reading %s: %s", candidate, e)
+
+    if knowledge_dir.exists():
+        for p in knowledge_dir.iterdir():
+            if "prompt" in p.name.lower() and p.suffix.lower() in (".md", ".txt"):
+                try:
+                    content = p.read_text(encoding="utf-8").strip()
+                    if content:
+                        _CACHED_MASTER_PROMPT = content
+                        return _CACHED_MASTER_PROMPT
+                except Exception:
+                    pass
+
+    _CACHED_MASTER_PROMPT = (
+        "Você é um estrategista de Neurocopy especializado em percepção humana, "
+        "comportamento de decisão, comunicação e narrativas de alta autoridade."
+    )
+    return _CACHED_MASTER_PROMPT
+
 
 # ---------------------------------------------------------
 # Dynamic Menus & Prompts from Bot Workflow Diagram
@@ -373,10 +423,12 @@ def create_generate_copy_node(llm: BaseChatModel):
 
         brand_line = f"- @ da Marca: {brand_handle}\n" if brand_handle else ""
 
+        master_prompt = get_master_prompt()
         system_instruction = (
-            "Você é um Copywriter Direto de Alta Conversão de classe mundial, especialista em neuro-vendas, "
-            "persuasão ética e frameworks validados.\n"
-            "Sua missão é gerar copies irresistíveis, práticas e prontas para publicação no WhatsApp/Instagram."
+            f"{master_prompt}\n\n"
+            "=== DIRETRIZ DE EXECUÇÃO PRÁTICA ===\n"
+            "Aplique rigorosamente as leis, princípios de percepção humana, quebra de clichês e arquitetura "
+            "de decisão do Sistema-Mestre de Neurocopy acima na elaboração da copy solicitada a seguir."
         )
 
         rag_context = (state.get("rag_context") or "").strip()
@@ -407,7 +459,15 @@ def create_generate_copy_node(llm: BaseChatModel):
 
         logger.info("Invoking LLM for user %s [format=%s, sub_intent=%s]", state.get("user_id"), format_type, sub_intent)
         ai_response = await llm.ainvoke(messages)
-        copy_content = ai_response.content if isinstance(ai_response.content, str) else str(ai_response.content)
+        if isinstance(ai_response.content, str):
+            copy_content = ai_response.content
+        elif isinstance(ai_response.content, list):
+            copy_content = "\n".join(
+                p.get("text", "") if isinstance(p, dict) else getattr(p, "text", str(p))
+                for p in ai_response.content
+            )
+        else:
+            copy_content = str(ai_response.content)
 
         return {
             "current_step": StepName.COPY_REFINEMENT.value,
