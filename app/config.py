@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,11 +15,18 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
-    # Concurrency and Cache parameters
+    # Security & Edge configuration
+    WEBHOOK_SECRET: Optional[str] = None  # Expected signature for webhooks (e.g. Evolution/WhatsApp)
+    ADMIN_API_KEY: Optional[str] = "admin_super_secret_key_123"  # Admin RBAC key
+    PBKDF2_ITERATIONS: int = 600_000
+    HITL_ENABLED: bool = True  # Human-in-the-Loop activation
+
+    # Concurrency, Debounce and Cache parameters
     REDIS_DEDUP_TTL_SECONDS: int = 300  # 5 minutes
     REDIS_LOCK_TIMEOUT_SECONDS: float = 10.0  # Distributed lock lease timeout
     REDIS_LOCK_BLOCKING_TIMEOUT_SECONDS: float = 2.0  # Max time to wait for lock
     REDIS_SESSION_CACHE_TTL_SECONDS: int = 1800  # 30 minutes
+    DEBOUNCE_WAIT_SECONDS: float = 2.0  # Window to debounce fragmented messages
 
     # Evolution API (WhatsApp)
     EVOLUTION_API_URL: str = "http://evolution:8080"

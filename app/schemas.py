@@ -22,6 +22,8 @@ class StepName(str, Enum):
     AWAITING_COPY_BRIEF = "AWAITING_COPY_BRIEF"
     GENERATE_COPY = "GENERATE_COPY"
     COPY_REFINEMENT = "COPY_REFINEMENT"
+    HUMAN_HANDOFF = "HUMAN_HANDOFF"
+    AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION"
 
 
 class WebhookEvent(BaseModel):
@@ -31,18 +33,21 @@ class WebhookEvent(BaseModel):
     sender_id: str = Field(..., description="Sender identifier, typically phone number (E.164)")
     message_text: str = Field(..., description="Text content sent by the user")
     timestamp: datetime = Field(..., description="Timestamp when message was generated")
+    company_id: Optional[str] = Field("default", description="Multi-tenant company/tenant identifier")
 
 
 class WebhookResponse(BaseModel):
     """Standardized response contract for messaging webhooks."""
 
-    status: str = Field(..., description="'success', 'ignored', 'busy', or 'error'")
+    status: str = Field(..., description="'success', 'ignored', 'busy', 'blocked', or 'error'")
     reason: Optional[str] = Field(None, description="Reason if status is not success (e.g. duplicate_event)")
     response_text: Optional[str] = Field(None, description="Generated response message for the user")
     current_step: Optional[str] = Field(None, description="Current workflow state step")
     user_id: Optional[uuid.UUID] = Field(None, description="User UUID")
     format_type: Optional[str] = Field(None, description="Active copy format if selected")
     sub_intent: Optional[str] = Field(None, description="Sub-intent / objective if selected")
+    human_handoff: Optional[bool] = Field(False, description="Flag indicating human operator takeover")
+    company_id: Optional[str] = Field("default", description="Tenant ID")
 
 
 class AuditEventType(str, Enum):
@@ -55,6 +60,14 @@ class AuditEventType(str, Enum):
     RAG_RETRIEVAL = "RAG_RETRIEVAL"
     COPY_GENERATED = "COPY_GENERATED"
     OUTBOUND_DISPATCH = "OUTBOUND_DISPATCH"
+    GUARDRAILS_BLOCKED_INPUT = "GUARDRAILS_BLOCKED_INPUT"
+    GUARDRAILS_BLOCKED_OUTPUT = "GUARDRAILS_BLOCKED_OUTPUT"
+    HUMAN_HANDOFF_TRIGGERED = "HUMAN_HANDOFF_TRIGGERED"
+    CRITICAL_ACTION_PENDING = "CRITICAL_ACTION_PENDING"
+    CRITICAL_ACTION_CONFIRMED = "CRITICAL_ACTION_CONFIRMED"
+    CRITICAL_ACTION_CANCELLED = "CRITICAL_ACTION_CANCELLED"
+    WEBHOOK_AUTH_FAILED = "WEBHOOK_AUTH_FAILED"
+    DEBOUNCE_BUFFERED = "DEBOUNCE_BUFFERED"
     ERROR = "ERROR"
 
 
@@ -82,6 +95,7 @@ class AgentState(TypedDict, total=False):
 
     user_id: uuid.UUID
     phone_number: str
+    company_id: Optional[str]
     name: Optional[str]
     profession: Optional[str]
     niche: Optional[str]
@@ -97,3 +111,5 @@ class AgentState(TypedDict, total=False):
     error: Optional[str]
     daily_trigger_fired: Optional[bool]
     rag_context: Optional[str]
+    human_handoff: Optional[bool]
+    pending_action: Optional[str]

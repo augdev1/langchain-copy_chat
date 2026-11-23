@@ -11,11 +11,14 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base, get_db, get_redis
+from app.config import get_settings
 from app.graph import build_copy_graph
 from app.main import app, get_compiled_graph
 from app.models import AuditLog, MessageHistory, User
 from app.repository import UserRepository
 from app.schemas import AuditEventType, FormatType, StepName
+
+settings = get_settings()
 
 
 # -------------------------------------------------------------------------
@@ -656,8 +659,12 @@ async def test_audit_trail_logging_and_endpoints(client: AsyncClient, session_fa
     assert resp3.status_code == 200
     assert resp3.json()["status"] == "ignored"
 
-    # 4. Query /audit/logs
-    logs_resp = await client.get("/audit/logs", params={"phone_number": phone})
+    # 4. Query /audit/logs with admin authentication
+    logs_resp = await client.get(
+        "/audit/logs",
+        params={"phone_number": phone},
+        headers={"X-Admin-Key": settings.ADMIN_API_KEY},
+    )
     assert logs_resp.status_code == 200
     logs = logs_resp.json()
     assert len(logs) >= 3
@@ -675,14 +682,96 @@ async def test_audit_trail_logging_and_endpoints(client: AsyncClient, session_fa
     assert onboarding_event["step_to"] == "CHOOSE_FORMAT"
     assert onboarding_event["payload"]["name"] == "Juliana"
 
-    # 5. Query /audit/stats
-    stats_resp = await client.get("/audit/stats")
+    # 5. Query /audit/stats with admin authentication
+    stats_resp = await client.get(
+        "/audit/stats",
+        headers={"X-Admin-Key": settings.ADMIN_API_KEY},
+    )
     assert stats_resp.status_code == 200
     stats = stats_resp.json()
     assert stats["total_audit_events"] >= 3
     assert AuditEventType.ONBOARDING_COMPLETED.value in stats["events_by_type"]
     assert "SUCCESS" in stats["events_by_status"]
     assert "IGNORED" in stats["events_by_status"]
+
+
+@pytest.mark.asyncio
+async def test_human_in_the_loop_handoff_and_critical_actions(client: AsyncClient, session_factory):
+    """
+    Scenario K: Adaptive Human-in-the-Loop (HITL).
+    1. Priority Human Handoff (<5ms): Immediately interrupts bot and alerts human operator.
+    2. Critical/Destructive Action (Account Reset): Requires explicit confirmation ('SIM' / 'NÃO').
+    """
+    phone = "5511999990099"
+    t = "2026-11-23T10:00:00Z"
+
+    # 1. Onboarding
+    await client.post(
+        "/webhook/message",
+        json={"message_id": "hitl_1", "sender_id": phone, "message_text": "Carlos Eduardo, Trader, @carlostrader", "timestamp": t},
+    )
+
+    # 2. Priority Human Handoff Request
+    resp_handoff = await client.post(
+        "/webhook/message",
+        json={"message_id": "hitl_2", "sender_id": phone, "message_text": "Quero falar com atendente humano urgente", "timestamp": t},
+    )
+    assert resp_handoff.status_code == 200
+    data_handoff = resp_handoff.json()
+    assert data_handoff["human_handoff"] is True
+    assert data_handoff["current_step"] == StepName.HUMAN_HANDOFF.value
+    assert "transferindo seu atendimento para nossa equipe humana" in data_handoff["response_text"].lower()
+
+    # Verify audit log recorded human handoff
+    async with session_factory() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_phone(phone)
+        assert user is not None
+        assert user.is_human_handoff is True
+
+    # 3. Critical Action Request: Reset Account
+    resp_reset_req = await client.post(
+        "/webhook/message",
+        json={"message_id": "hitl_3", "sender_id": phone, "message_text": "Desejo resetar minha conta e apagar histórico", "timestamp": t},
+    )
+    assert resp_reset_req.status_code == 200
+    data_reset_req = resp_reset_req.json()
+    assert data_reset_req["current_step"] == StepName.AWAITING_CONFIRMATION.value
+    assert "ação crítica" in data_reset_req["response_text"].lower()
+    assert "responda com 'sim' para confirmar ou 'não' para cancelar" in data_reset_req["response_text"].lower()
+
+    # 4. Cancellation path: User says "NÃO"
+    resp_cancel = await client.post(
+        "/webhook/message",
+        json={"message_id": "hitl_4", "sender_id": phone, "message_text": "Não, prefiro cancelar", "timestamp": t},
+    )
+    assert resp_cancel.status_code == 200
+    data_cancel = resp_cancel.json()
+    assert data_cancel["current_step"] == StepName.CHOOSE_FORMAT.value
+    assert "ação cancelada com segurança" in data_cancel["response_text"].lower()
+
+    # 5. Confirmation path: Request reset again, then send "SIM"
+    await client.post(
+        "/webhook/message",
+        json={"message_id": "hitl_5", "sender_id": phone, "message_text": "resetar minha conta", "timestamp": t},
+    )
+    resp_confirm = await client.post(
+        "/webhook/message",
+        json={"message_id": "hitl_6", "sender_id": phone, "message_text": "SIM, CONFIRMO", "timestamp": t},
+    )
+    assert resp_confirm.status_code == 200
+    data_confirm = resp_confirm.json()
+    assert data_confirm["current_step"] == StepName.ASK_ONBOARDING.value
+    assert "ação confirmada" in data_confirm["response_text"].lower()
+
+    # Verify user profile was safely reset in database
+    async with session_factory() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_phone(phone)
+        assert user.name is None
+        assert user.niche is None
+        assert user.current_step == StepName.ASK_ONBOARDING.value
+
 
 
 

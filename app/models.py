@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -26,6 +26,12 @@ class User(Base):
         unique=True,
         index=True,
         nullable=False,
+    )
+    company_id: Mapped[str] = mapped_column(
+        String(100),
+        default="default",
+        nullable=False,
+        index=True,
     )
     name: Mapped[Optional[str]] = mapped_column(
         String(255),
@@ -55,6 +61,15 @@ class User(Base):
         String(50),
         default="ASK_ONBOARDING",
         nullable=False,
+    )
+    is_human_handoff: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    pending_action: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
     )
     last_interaction_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -130,6 +145,12 @@ class KnowledgeChunk(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
+    company_id: Mapped[str] = mapped_column(
+        String(100),
+        default="default",
+        nullable=False,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -173,6 +194,12 @@ class AuditLog(Base):
         Uuid,
         primary_key=True,
         default=uuid.uuid4,
+    )
+    company_id: Mapped[str] = mapped_column(
+        String(100),
+        default="default",
+        nullable=False,
+        index=True,
     )
     event_type: Mapped[str] = mapped_column(
         String(50),
@@ -228,5 +255,4 @@ class AuditLog(Base):
 
 
 Index("ix_audit_logs_phone_created", AuditLog.phone_number, AuditLog.created_at.desc())
-
-
+Index("ix_audit_logs_company_phone", AuditLog.company_id, AuditLog.phone_number)

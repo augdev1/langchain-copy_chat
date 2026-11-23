@@ -1,0 +1,14 @@
+models:
+  - type: main
+    engine: google-genai
+    model: gemini-3.8-flash
+
+rails:
+  input:
+    flows:
+      - check jailbreak
+      - check prompt injection
+      - check social engineering
+  output:
+    flows:
+      - check secret leakage

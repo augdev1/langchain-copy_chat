@@ -1,0 +1,509 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+    width: 1920px;
+    height: 1080px;
+    background: radial-gradient(circle at 20% 20%, #0f172a 0%, #020617 100%);
+    color: #f8fafc;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Ambient glow */
+.ambient-glow {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0) 70%);
+    top: -100px;
+    left: -100px;
+    filter: blur(80px);
+    pointer-events: none;
+}
+
+.ambient-glow-2 {
+    position: absolute;
+    width: 700px;
+    height: 700px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0) 70%);
+    bottom: -150px;
+    right: -150px;
+    filter: blur(90px);
+    pointer-events: none;
+}
+
+/* Phone Mockup Frame */
+.phone-frame {
+    width: 440px;
+    height: 920px;
+    background: #0b141a;
+    border-radius: 54px;
+    box-shadow: 
+        0 0 0 12px #1e293b,
+        0 0 0 14px #334155,
+        0 30px 60px -12px rgba(0, 0, 0, 0.7),
+        0 0 50px rgba(16, 185, 129, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+}
+
+/* iPhone Dynamic Island & Status Bar */
+.phone-status-bar {
+    height: 48px;
+    padding: 12px 28px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    background: #111b21;
+    z-index: 10;
+}
+
+.dynamic-island {
+    width: 110px;
+    height: 26px;
+    background: #000000;
+    border-radius: 18px;
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* WhatsApp Header */
+.wa-header {
+    height: 64px;
+    background: #111b21;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    z-index: 5;
+}
+
+.wa-avatar-box {
+    position: relative;
+    width: 42px;
+    height: 42px;
+}
+
+.wa-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #10b981, #047857);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 20px;
+    font-weight: bold;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.verified-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    background: #10b981;
+    color: #fff;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    border: 2px solid #111b21;
+}
+
+.wa-user-info {
+    flex: 1;
+}
+
+.wa-user-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #e9edef;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wa-status {
+    font-size: 12px;
+    color: #10b981;
+    font-weight: 500;
+}
+
+/* WhatsApp Chat Area */
+.wa-chat-area {
+    flex: 1;
+    background-color: #0b141a;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 20px 20px;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+/* WhatsApp Date Divider */
+.wa-date-divider {
+    align-self: center;
+    background: #182229;
+    color: #8696a0;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* Bubbles */
+.wa-bubble {
+    max-width: 88%;
+    padding: 9px 12px 6px 12px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    line-height: 1.45;
+    position: relative;
+    word-wrap: break-word;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.15);
+}
+
+.wa-bubble.incoming {
+    align-self: flex-start;
+    background: #202c33;
+    color: #e9edef;
+    border-top-left-radius: 2px;
+}
+
+.wa-bubble.outgoing {
+    align-self: flex-end;
+    background: #005c4b;
+    color: #e9edef;
+    border-top-right-radius: 2px;
+}
+
+.wa-bubble strong {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.wa-bubble em {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+.wa-bubble-meta {
+    float: right;
+    margin-left: 10px;
+    margin-top: 4px;
+    font-size: 10.5px;
+    color: #8696a0;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.wa-checkmarks {
+    color: #53bdeb;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* Bottom Bar */
+.wa-input-bar {
+    height: 60px;
+    background: #202c33;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 10px;
+}
+
+.wa-input-pill {
+    flex: 1;
+    height: 38px;
+    background: #2a3942;
+    border-radius: 20px;
+    padding: 0 16px;
+    color: #8696a0;
+    font-size: 13.5px;
+    display: flex;
+    align-items: center;
+}
+
+.wa-mic-btn {
+    width: 38px;
+    height: 38px;
+    background: #00a884;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #fff;
+    font-size: 16px;
+}
+
+
+.container {
+    width: 1720px;
+    height: 940px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 2;
+}
+
+/* Left Output Mockup (Wider WhatsApp View) */
+.phone-frame.wide {
+    width: 520px;
+    height: 920px;
+    border-radius: 54px;
+}
+
+/* Right Features */
+.right-panel {
+    flex: 1;
+    max-width: 980px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+
+.section-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+h2.panel-title {
+    font-size: 48px;
+    font-weight: 900;
+    line-height: 1.15;
+    color: #ffffff;
+}
+
+.breakdown-box {
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.breakdown-item {
+    display: flex;
+    gap: 16px;
+}
+
+.breakdown-num {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: #005c4b;
+    color: #34d399;
+    font-weight: 800;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.breakdown-item h4 {
+    font-size: 17px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 4px;
+}
+
+.breakdown-item p {
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.5;
+}
+
+.kpi-row {
+    display: flex;
+    gap: 20px;
+}
+
+.kpi-card {
+    flex: 1;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+}
+
+.kpi-value {
+    font-size: 36px;
+    font-weight: 900;
+    color: #10b981;
+    margin-bottom: 4px;
+}
+
+.kpi-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+</style>
+</head>
+<body>
+<div class="ambient-glow"></div>
+<div class="ambient-glow-2"></div>
+
+<div class="container">
+    <!-- Phone Output -->
+    <div class="phone-frame wide">
+        <div class="dynamic-island"></div>
+        <div class="phone-status-bar">
+            <span>09:44</span>
+            <span>5G 􀛨 100%</span>
+        </div>
+
+        <div class="wa-header">
+            <div class="wa-avatar-box">
+                <div class="wa-avatar">🤖</div>
+                <div class="verified-badge">✓</div>
+            </div>
+            <div class="wa-user-info">
+                <div class="wa-user-name">CopyBot AI <span style="color:#10b981;font-size:13px;">✔</span></div>
+                <div class="wa-status">online</div>
+            </div>
+        </div>
+
+        <div class="wa-chat-area">
+            <div class="wa-bubble incoming" style="background:#182229; border-left: 4px solid #10b981;">
+                🔥 <strong>Your high-converting STORIES sequence is ready!</strong><br><br>
+                <strong>SCREEN 1 | HOOK (Pattern Interrupt)</strong><br>
+                <em>🎥 Plain background text or focused direct-to-camera video:</em><br>
+                The worst feeling in fitness isn't failing.<br>
+                <strong>It's living in the 'almost'.</strong><br><br>
+                Training 6 days a week, giving up weekends on diet, looking in the mirror and still just looking like someone who "tries" — with zero real muscle definition.
+                <div class="wa-bubble-meta">09:44</div>
+            </div>
+
+            <div class="wa-bubble incoming" style="background:#182229; border-left: 4px solid #38bdf8;">
+                <strong>SCREEN 3 | INVISIBLE MECHANISM (Technical Authority)</strong><br>
+                <em>🎥 Simple graphic element or training schedule print:</em><br>
+                Dense muscle doesn't respond to <strong>exhaustion</strong>. It responds to <strong>mechanical tension</strong>.<br><br>
+                Training 6 consecutive days accumulating metabolic fatigue elevates cortisol and blunts high-threshold motor unit recruitment.
+                <div class="wa-bubble-meta">09:44</div>
+            </div>
+
+            <div class="wa-bubble incoming" style="background:#182229; border-left: 4px solid #f59e0b;">
+                <strong>SCREEN 6 | DIRECT OFFER & CTA</strong><br>
+                I am opening <strong>4 spots</strong> today for my High Performance Coaching this month.<br><br>
+                👉 Reply <strong>"RESULTS"</strong> to receive the private selection criteria.
+                <div class="wa-bubble-meta">09:45</div>
+            </div>
+        </div>
+
+        <div class="wa-input-bar">
+            <div class="wa-input-pill">Type 'MENU' or request changes...</div>
+            <div class="wa-mic-btn">➤</div>
+        </div>
+    </div>
+
+    <!-- Right Side Breakdown -->
+    <div class="right-panel">
+        <div class="section-tag">Automated Content Delivery</div>
+        
+        <h2 class="panel-title">
+            Persuasive High-Converting Copy Generated in Seconds
+        </h2>
+        
+        <div class="breakdown-box">
+            <div class="breakdown-item">
+                <div class="breakdown-num">1</div>
+                <div>
+                    <h4>Pattern Interrupt Hook</h4>
+                    <p>Captures 100% of user attention within the first 3 seconds without clickbait, reframing common market frustrations.</p>
+                </div>
+            </div>
+
+            <div class="breakdown-item">
+                <div class="breakdown-num">2</div>
+                <div>
+                    <h4>The Invisible Mechanism (Scientific Proof)</h4>
+                    <p>Substitutes superficial tips with technical authority, establishing undeniable credibility and intellectual trust.</p>
+                </div>
+            </div>
+
+            <div class="breakdown-item">
+                <div class="breakdown-num">3</div>
+                <div>
+                    <h4>Director's Scene & Camera Notes</h4>
+                    <p>Provides exact production instructions (camera angles, typography, tone of voice) for creators who record video or post stories.</p>
+                </div>
+            </div>
+
+            <div class="breakdown-item">
+                <div class="breakdown-num">4</div>
+                <div>
+                    <h4>Frictionless Direct Call-To-Action</h4>
+                    <p>Engineered for high reply rates on Instagram Stories and direct WhatsApp pipeline generation.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="kpi-row">
+            <div class="kpi-card">
+                <div class="kpi-value">&lt; 2.5s</div>
+                <div class="kpi-label">Generation Latency</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-value">Gemini 3.8</div>
+                <div class="kpi-label">Flash Model API</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-value">100%</div>
+                <div class="kpi-label">State Persistence</div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

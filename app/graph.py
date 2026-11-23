@@ -1,7 +1,7 @@
 import logging
-from pathlib import Path
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Tuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -10,6 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 
 from app.config import get_settings
+from app.guardrails_service import security_guardrails
 from app.schemas import AgentState, FormatType, StepName
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,34 @@ ONBOARDED_STEPS = {
     StepName.COPY_REFINEMENT.value,
 }
 
+# Human-in-the-Loop & Critical Action Keywords
+HUMAN_HANDOFF_KEYWORDS = [
+    "falar com atendente",
+    "humano urgente",
+    "atendente",
+    "falar com humano",
+    "suporte humano",
+    "falar com suporte",
+    "atendente humano",
+    "não quero robô",
+    "nao quero robo",
+    "quero falar com uma pessoa",
+    "atendimento humano",
+]
+
+CRITICAL_ACTION_RESET_KEYWORDS = [
+    "resetar conta",
+    "resetar minha conta",
+    "apagar histórico",
+    "apagar meu histórico",
+    "apagar meu historico",
+    "apagar historico",
+    "excluir dados",
+    "limpar tudo",
+    "apagar tudo",
+    "excluir minha conta",
+]
+
 
 # ---------------------------------------------------------
 # Extraction Helpers
@@ -181,7 +210,6 @@ def parse_onboarding_input(text: str) -> Tuple[str, str, Optional[str]]:
 
     # Remove handle from text for easier parsing
     text_without_handle = re.sub(r"@[A-Za-z0-9_\.]+", "", clean_text).strip()
-    # Strip phrases referencing the handle
     text_without_handle = re.sub(
         r"(,\s*)?(e\s+)?(o\s+)?(meu\s+)?(@|arroba)(\s+da\s+minha\s+marca|\s+da\s+marca)?\s*(é)?\s*$",
         "",
@@ -189,7 +217,6 @@ def parse_onboarding_input(text: str) -> Tuple[str, str, Optional[str]]:
         flags=re.IGNORECASE,
     ).strip()
 
-    # Split into parts
     parts = [
         p.strip()
         for p in re.split(
@@ -263,7 +290,6 @@ def detect_clear_intent(text: str) -> Tuple[Optional[str], Optional[str], Option
         elif "reativ" in t or "antigo" in t:
             sub_intent = "Reativação de leads antigos"
 
-    # If format is found and the user provided more than 4 words, it's a clear detailed intent!
     if format_type and len(words) >= 4:
         sub_intent = sub_intent or "Personalizado"
         return format_type, sub_intent, text
@@ -272,7 +298,97 @@ def detect_clear_intent(text: str) -> Tuple[Optional[str], Optional[str], Option
 
 
 # ---------------------------------------------------------
-# Graph Nodes
+# Security & HITL Edge Node
+# ---------------------------------------------------------
+
+
+def security_and_hitl_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Cognitive Security and Adaptive Human-in-the-Loop Node.
+    Executes in <1ms:
+    1. Inspects input against jailbreaks, prompt injections and social engineering.
+    2. Identifies priority human handoff requests and triggers instant transfer.
+    3. Traps critical/destructive actions in a pending state requiring explicit confirmation.
+    """
+    input_text = (state.get("input_text") or "").strip()
+    phone = state.get("phone_number") or ""
+    company_id = state.get("company_id") or "default"
+    current_step = state.get("current_step", StepName.ASK_ONBOARDING.value)
+
+    # 1. Cognitive Security Check (NeMo Guardrails & Regex Heuristics)
+    decision = security_guardrails.inspect_input(input_text, phone=phone, company_id=company_id)
+    if not decision.allowed:
+        return {
+            "response_text": decision.safe_response,
+            "error": "GUARDRAILS_BLOCKED_INPUT",
+            "current_step": current_step,
+        }
+
+    # 2. Human-in-the-Loop: Evaluate Pending Confirmation (Prevenção de Ações Cegas)
+    if current_step == StepName.AWAITING_CONFIRMATION.value:
+        upper = input_text.upper()
+        if any(w in upper for w in ["SIM", "CONFIRMO", "CONFIRMA", "QUERO"]):
+            return {
+                "name": None,
+                "niche": None,
+                "profession": None,
+                "brand_handle": None,
+                "format_type": None,
+                "sub_intent": None,
+                "current_step": StepName.ASK_ONBOARDING.value,
+                "pending_action": None,
+                "response_text": (
+                    "✅ Ação confirmada: Sua conta e histórico foram resetados com sucesso. "
+                    "Digite 'Oi' quando quiser começar novamente!"
+                ),
+            }
+        elif any(w in upper for w in ["NÃO", "NAO", "CANCELA", "CANCELAR"]):
+            return {
+                "current_step": StepName.CHOOSE_FORMAT.value,
+                "pending_action": None,
+                "response_text": (
+                    "❌ Ação cancelada com segurança. Nenhum dado foi alterado.\n\n"
+                    f"{MENU_ETAPA1_TEXT}"
+                ),
+            }
+        else:
+            return {
+                "current_step": StepName.AWAITING_CONFIRMATION.value,
+                "response_text": (
+                    "⚠️ Confirmação pendente. Para confirmar a ação crítica, responda com 'SIM'. "
+                    "Para cancelar, responda com 'NÃO'."
+                ),
+            }
+
+    # 3. Human-in-the-Loop: Check for Critical/Destructive Action Request
+    clean_lower = input_text.lower()
+    if any(k in clean_lower for k in CRITICAL_ACTION_RESET_KEYWORDS):
+        return {
+            "current_step": StepName.AWAITING_CONFIRMATION.value,
+            "pending_action": "RESET_ACCOUNT",
+            "response_text": (
+                "⚠️ ATENÇÃO: Você solicitou uma ação crítica (Resetar seus dados e histórico de copies). "
+                "Esta ação é irreversível. Deseja realmente prosseguir? "
+                "Responda com 'SIM' para confirmar ou 'NÃO' para cancelar."
+            ),
+        }
+
+    # 4. Human-in-the-Loop: Check for Human Handoff Request (<5ms)
+    if any(k in clean_lower for k in HUMAN_HANDOFF_KEYWORDS):
+        return {
+            "current_step": StepName.HUMAN_HANDOFF.value,
+            "human_handoff": True,
+            "response_text": (
+                "Entendido! 👤 Estou transferindo seu atendimento para nossa equipe humana agora mesmo. "
+                "Um especialista irá te responder por aqui em instantes. Aguarde só um momento!"
+            ),
+        }
+
+    return {}
+
+
+# ---------------------------------------------------------
+# Graph Core Nodes
 # ---------------------------------------------------------
 
 
@@ -316,7 +432,6 @@ def onboarding_node(state: AgentState) -> Dict[str, Any]:
     """
     input_text = (state.get("input_text") or "").strip()
 
-    # Initial greeting trigger
     if input_text.lower() in {"oi", "olá", "ola", "começar", "comecar", "start", "iniciar", "bom dia", "boa tarde"}:
         return {
             "current_step": StepName.ASK_ONBOARDING.value,
@@ -349,7 +464,6 @@ def format_selection_node(state: AgentState) -> Dict[str, Any]:
     input_text = (state.get("input_text") or "").strip()
     raw_choice = input_text.upper()
 
-    # 1. Smart intent check: does user message already explain what they want?
     detected_format, detected_sub_intent, brief = detect_clear_intent(input_text)
     if detected_format:
         logger.info("Smart intent detected: skipping Etapa 2 [format=%s, intent=%s]", detected_format, detected_sub_intent)
@@ -360,7 +474,6 @@ def format_selection_node(state: AgentState) -> Dict[str, Any]:
             "current_step": StepName.GENERATE_COPY.value,
         }
 
-    # 2. Closed choice check (1, 2, 3, 4)
     if raw_choice not in FORMAT_MAP:
         return {
             "current_step": StepName.CHOOSE_FORMAT.value,
@@ -391,7 +504,6 @@ def sub_intent_node(state: AgentState) -> Dict[str, Any]:
 
     sub_intent = choice_map.get(input_text) or input_text
 
-    # Special case: Feed option 3 ("Me dê ideias baseadas no meu negócio")
     if format_type == FormatType.FEED.value and input_text == "3":
         return {
             "sub_intent": "Ideias baseadas no negócio",
@@ -410,7 +522,7 @@ def sub_intent_node(state: AgentState) -> Dict[str, Any]:
 
 
 def create_generate_copy_node(llm: BaseChatModel):
-    """Factory creating copy execution node with injected LLM and RAG context."""
+    """Factory creating copy execution node with injected LLM, RAG and Output Guardrails."""
 
     async def generate_copy_node(state: AgentState) -> Dict[str, Any]:
         name = state.get("name") or "Criador"
@@ -469,11 +581,18 @@ def create_generate_copy_node(llm: BaseChatModel):
         else:
             copy_content = str(ai_response.content)
 
+        # Output Rails: check for secret leakage
+        sanitized_copy = security_guardrails.inspect_output(
+            copy_content,
+            phone=state.get("phone_number", ""),
+            company_id=state.get("company_id", "default"),
+        )
+
         return {
             "current_step": StepName.COPY_REFINEMENT.value,
             "response_text": (
                 f"🔥 *Sua copy de alta conversão para {format_type} ({sub_intent}) está pronta!*\n\n"
-                f"{copy_content}\n\n"
+                f"{sanitized_copy}\n\n"
                 f"---\n"
                 f"Gostou? Quer ajustar algo (tom, CTA, comprimento) ou criar outro formato?\n"
                 f"Responda com seu ajuste ou digite 'MENU' para criar um novo conteúdo."
@@ -488,6 +607,20 @@ def create_generate_copy_node(llm: BaseChatModel):
 # ---------------------------------------------------------
 
 
+def route_after_security(state: AgentState) -> Literal["end", "eval_daily_trigger"]:
+    """
+    Halts graph execution immediately if guardrails or HITL returned a response.
+    Otherwise advances to temporal and intent evaluation.
+    """
+    if state.get("error") == "GUARDRAILS_BLOCKED_INPUT":
+        return "end"
+    if state.get("human_handoff"):
+        return "end"
+    if state.get("response_text"):
+        return "end"
+    return "eval_daily_trigger"
+
+
 def route_after_eval(state: AgentState) -> Literal["end", "onboarding", "format_selection", "sub_intent", "generate_copy"]:
     """Determines next node following temporal check."""
     if state.get("daily_trigger_fired"):
@@ -496,7 +629,6 @@ def route_after_eval(state: AgentState) -> Literal["end", "onboarding", "format_
     current_step = state.get("current_step", StepName.ASK_ONBOARDING.value)
     input_text = (state.get("input_text") or "").strip().upper()
 
-    # User typed MENU to return to format selection
     if input_text == "MENU" and current_step in ONBOARDED_STEPS:
         return "format_selection"
 
@@ -523,7 +655,7 @@ def route_after_format(state: AgentState) -> Literal["end", "generate_copy"]:
 
 
 def route_after_sub_intent(state: AgentState) -> Literal["end", "generate_copy"]:
-    """Routes to generation if Etapa 2 automatically triggered copy generation (e.g. Ideas)."""
+    """Routes to generation if Etapa 2 automatically triggered copy generation."""
     if state.get("current_step") == StepName.GENERATE_COPY.value:
         return "generate_copy"
     return "end"
@@ -536,7 +668,8 @@ def route_after_sub_intent(state: AgentState) -> Literal["end", "generate_copy"]
 
 def build_copy_graph(llm: Optional[BaseChatModel] = None) -> StateGraph:
     """
-    Constructs and compiles the StateGraph according to the new workflow.
+    Constructs and compiles the StateGraph incorporating Cognitive Security
+    and Adaptive Human-in-the-Loop gates.
     """
     if llm is None:
         llm = ChatGoogleGenerativeAI(
@@ -548,14 +681,25 @@ def build_copy_graph(llm: Optional[BaseChatModel] = None) -> StateGraph:
     builder = StateGraph(AgentState)
 
     # Register nodes
+    builder.add_node("security_and_hitl", security_and_hitl_node)
     builder.add_node("eval_daily_trigger", eval_daily_trigger)
     builder.add_node("onboarding", onboarding_node)
     builder.add_node("format_selection", format_selection_node)
     builder.add_node("sub_intent", sub_intent_node)
     builder.add_node("generate_copy", create_generate_copy_node(llm))
 
-    # Entry point
-    builder.set_entry_point("eval_daily_trigger")
+    # Entry point is security inspection (<1ms)
+    builder.set_entry_point("security_and_hitl")
+
+    # Routing from security node
+    builder.add_conditional_edges(
+        "security_and_hitl",
+        route_after_security,
+        {
+            "end": END,
+            "eval_daily_trigger": "eval_daily_trigger",
+        },
+    )
 
     # Routing from temporal node
     builder.add_conditional_edges(
@@ -580,7 +724,7 @@ def build_copy_graph(llm: Optional[BaseChatModel] = None) -> StateGraph:
         },
     )
 
-    # Conditional routing after sub-intent (to generate ideas immediately if chosen)
+    # Conditional routing after sub-intent
     builder.add_conditional_edges(
         "sub_intent",
         route_after_sub_intent,

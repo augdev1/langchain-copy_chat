@@ -1,0 +1,488 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+    width: 1920px;
+    height: 1080px;
+    background: radial-gradient(circle at 20% 20%, #0f172a 0%, #020617 100%);
+    color: #f8fafc;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Ambient glow */
+.ambient-glow {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0) 70%);
+    top: -100px;
+    left: -100px;
+    filter: blur(80px);
+    pointer-events: none;
+}
+
+.ambient-glow-2 {
+    position: absolute;
+    width: 700px;
+    height: 700px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0) 70%);
+    bottom: -150px;
+    right: -150px;
+    filter: blur(90px);
+    pointer-events: none;
+}
+
+/* Phone Mockup Frame */
+.phone-frame {
+    width: 440px;
+    height: 920px;
+    background: #0b141a;
+    border-radius: 54px;
+    box-shadow: 
+        0 0 0 12px #1e293b,
+        0 0 0 14px #334155,
+        0 30px 60px -12px rgba(0, 0, 0, 0.7),
+        0 0 50px rgba(16, 185, 129, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+}
+
+/* iPhone Dynamic Island & Status Bar */
+.phone-status-bar {
+    height: 48px;
+    padding: 12px 28px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    background: #111b21;
+    z-index: 10;
+}
+
+.dynamic-island {
+    width: 110px;
+    height: 26px;
+    background: #000000;
+    border-radius: 18px;
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* WhatsApp Header */
+.wa-header {
+    height: 64px;
+    background: #111b21;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    z-index: 5;
+}
+
+.wa-avatar-box {
+    position: relative;
+    width: 42px;
+    height: 42px;
+}
+
+.wa-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #10b981, #047857);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 20px;
+    font-weight: bold;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.verified-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    background: #10b981;
+    color: #fff;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    border: 2px solid #111b21;
+}
+
+.wa-user-info {
+    flex: 1;
+}
+
+.wa-user-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #e9edef;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wa-status {
+    font-size: 12px;
+    color: #10b981;
+    font-weight: 500;
+}
+
+/* WhatsApp Chat Area */
+.wa-chat-area {
+    flex: 1;
+    background-color: #0b141a;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 20px 20px;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+/* WhatsApp Date Divider */
+.wa-date-divider {
+    align-self: center;
+    background: #182229;
+    color: #8696a0;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* Bubbles */
+.wa-bubble {
+    max-width: 88%;
+    padding: 9px 12px 6px 12px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    line-height: 1.45;
+    position: relative;
+    word-wrap: break-word;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.15);
+}
+
+.wa-bubble.incoming {
+    align-self: flex-start;
+    background: #202c33;
+    color: #e9edef;
+    border-top-left-radius: 2px;
+}
+
+.wa-bubble.outgoing {
+    align-self: flex-end;
+    background: #005c4b;
+    color: #e9edef;
+    border-top-right-radius: 2px;
+}
+
+.wa-bubble strong {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.wa-bubble em {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+.wa-bubble-meta {
+    float: right;
+    margin-left: 10px;
+    margin-top: 4px;
+    font-size: 10.5px;
+    color: #8696a0;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.wa-checkmarks {
+    color: #53bdeb;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* Bottom Bar */
+.wa-input-bar {
+    height: 60px;
+    background: #202c33;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 10px;
+}
+
+.wa-input-pill {
+    flex: 1;
+    height: 38px;
+    background: #2a3942;
+    border-radius: 20px;
+    padding: 0 16px;
+    color: #8696a0;
+    font-size: 13.5px;
+    display: flex;
+    align-items: center;
+}
+
+.wa-mic-btn {
+    width: 38px;
+    height: 38px;
+    background: #00a884;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #fff;
+    font-size: 16px;
+}
+
+
+.header-banner {
+    position: absolute;
+    top: 40px;
+    left: 100px;
+    right: 100px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 20px;
+    z-index: 10;
+}
+
+.header-title-box h2 {
+    font-size: 32px;
+    font-weight: 800;
+    color: #ffffff;
+}
+
+.header-title-box p {
+    font-size: 16px;
+    color: #94a3b8;
+    margin-top: 4px;
+}
+
+.step-indicator {
+    display: flex;
+    gap: 12px;
+}
+
+.step-pill {
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.step-pill.active {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+    color: #34d399;
+}
+
+/* Triple Phone Layout */
+.phones-container {
+    margin-top: 80px;
+    display: flex;
+    gap: 40px;
+    align-items: center;
+    z-index: 2;
+}
+
+.phone-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+.phone-label {
+    font-size: 15px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+    padding: 6px 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.phone-frame.compact {
+    width: 380px;
+    height: 740px;
+    border-radius: 44px;
+}
+</style>
+</head>
+<body>
+<div class="ambient-glow"></div>
+<div class="ambient-glow-2"></div>
+
+<div class="header-banner">
+    <div class="header-title-box">
+        <h2>Interactive State Machine & Decision Architecture</h2>
+        <p>Zero cognitive friction: The bot guides users through validation, format selection, and briefing capture.</p>
+    </div>
+    <div class="step-indicator">
+        <div class="step-pill">1. Brand Identity</div>
+        <div class="step-pill active">2. Smart Intent Extraction</div>
+        <div class="step-pill">3. Copy Synthesis</div>
+    </div>
+</div>
+
+<div class="phones-container">
+    <!-- Step 1 Phone -->
+    <div class="phone-card">
+        <div class="phone-label">Stage 1 • Brand Calibration</div>
+        <div class="phone-frame compact">
+            <div class="dynamic-island" style="width: 90px; height: 22px;"></div>
+            <div class="phone-status-bar" style="height: 40px; font-size: 12px;">
+                <span>09:40</span>
+                <span>5G 􀛨 100%</span>
+            </div>
+            <div class="wa-header" style="height: 56px;">
+                <div class="wa-avatar" style="width: 36px; height: 36px; font-size: 17px;">🤖</div>
+                <div class="wa-user-info">
+                    <div class="wa-user-name" style="font-size: 14px;">CopyBot AI</div>
+                    <div class="wa-status" style="font-size: 11px;">online</div>
+                </div>
+            </div>
+            <div class="wa-chat-area" style="font-size: 12.5px;">
+                <div class="wa-bubble incoming">
+                    Hello! Welcome to the <strong>Copywriting Assistant Engine</strong>.<br><br>
+                    To calibrate your brand voice, please enter your Instagram handle:
+                    <div class="wa-bubble-meta">09:40</div>
+                </div>
+                <div class="wa-bubble outgoing">
+                    @julianamarketing
+                    <div class="wa-bubble-meta">09:40 <span class="wa-checkmarks">✓✓</span></div>
+                </div>
+                <div class="wa-bubble incoming">
+                    Great, Juliana! Brand profile calibrated successfully. ✨
+                    <div class="wa-bubble-meta">09:41</div>
+                </div>
+            </div>
+            <div class="wa-input-bar" style="height: 50px;">
+                <div class="wa-input-pill" style="height: 32px; font-size: 12px;">Type a message...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2 Phone -->
+    <div class="phone-card">
+        <div class="phone-label" style="color: #34d399; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.12);">Stage 2 • Multi-Format Menu</div>
+        <div class="phone-frame compact" style="box-shadow: 0 0 0 12px #10b98133, 0 25px 50px rgba(0,0,0,0.8);">
+            <div class="dynamic-island" style="width: 90px; height: 22px;"></div>
+            <div class="phone-status-bar" style="height: 40px; font-size: 12px;">
+                <span>09:41</span>
+                <span>5G 􀛨 100%</span>
+            </div>
+            <div class="wa-header" style="height: 56px;">
+                <div class="wa-avatar" style="width: 36px; height: 36px; font-size: 17px;">🤖</div>
+                <div class="wa-user-info">
+                    <div class="wa-user-name" style="font-size: 14px;">CopyBot AI</div>
+                    <div class="wa-status" style="font-size: 11px;">typing...</div>
+                </div>
+            </div>
+            <div class="wa-chat-area" style="font-size: 12.5px;">
+                <div class="wa-bubble incoming">
+                    Select your desired format:<br><br>
+                    1️⃣ <strong>STORIES</strong><br>
+                    2️⃣ <strong>FEED</strong> (Carousel / Post)<br>
+                    3️⃣ <strong>REELS</strong><br>
+                    4️⃣ <strong>WHATSAPP LEAD</strong>
+                    <div class="wa-bubble-meta">09:41</div>
+                </div>
+                <div class="wa-bubble outgoing">
+                    2
+                    <div class="wa-bubble-meta">09:41 <span class="wa-checkmarks">✓✓</span></div>
+                </div>
+                <div class="wa-bubble incoming">
+                    Selected format: <strong>FEED</strong>.<br><br>
+                    Would you like an <strong>Authority Carousel</strong> or a <strong>Single Post with High-Impact Caption</strong>?
+                    <div class="wa-bubble-meta">09:42</div>
+                </div>
+            </div>
+            <div class="wa-input-bar" style="height: 50px;">
+                <div class="wa-input-pill" style="height: 32px; font-size: 12px;">Type a message...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 3 Phone -->
+    <div class="phone-card">
+        <div class="phone-label" style="color: #a855f7; border-color: rgba(168, 85, 247, 0.3); background: rgba(168, 85, 247, 0.12);">Stage 3 • Smart Intent Bypass</div>
+        <div class="phone-frame compact">
+            <div class="dynamic-island" style="width: 90px; height: 22px;"></div>
+            <div class="phone-status-bar" style="height: 40px; font-size: 12px;">
+                <span>09:43</span>
+                <span>5G 􀛨 100%</span>
+            </div>
+            <div class="wa-header" style="height: 56px;">
+                <div class="wa-avatar" style="width: 36px; height: 36px; font-size: 17px;">🤖</div>
+                <div class="wa-user-info">
+                    <div class="wa-user-name" style="font-size: 14px;">CopyBot AI</div>
+                    <div class="wa-status" style="font-size: 11px;">online</div>
+                </div>
+            </div>
+            <div class="wa-chat-area" style="font-size: 12.5px;">
+                <div class="wa-bubble outgoing">
+                    I want a post about why audience size doesn't guarantee sales and how to build mental territory instead of vanity metrics.
+                    <div class="wa-bubble-meta">09:43 <span class="wa-checkmarks">✓✓</span></div>
+                </div>
+                <div class="wa-bubble incoming">
+                    🎯 <strong>Smart Intent Detected!</strong><br><br>
+                    Identified objective: <em>Authority Repositioning & Vanity Metric Breakdown</em>.<br><br>
+                    Generating your copy via <strong>Gemini 3.8 Flash API</strong> with system guidelines... ⏳
+                    <div class="wa-bubble-meta">09:43</div>
+                </div>
+            </div>
+            <div class="wa-input-bar" style="height: 50px;">
+                <div class="wa-input-pill" style="height: 32px; font-size: 12px;">Type a message...</div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

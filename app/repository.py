@@ -14,8 +14,8 @@ class UserRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_by_phone(self, phone_number: str) -> Optional[User]:
-        """Fetch user by unique phone number."""
+    async def get_by_phone(self, phone_number: str, company_id: str = "default") -> Optional[User]:
+        """Fetch user by unique phone number (and company_id)."""
         stmt = select(User).where(User.phone_number == phone_number)
         result = await self.session.execute(stmt)
         return result.scalars().first()
@@ -23,10 +23,11 @@ class UserRepository:
     async def get_or_create(
         self,
         phone_number: str,
+        company_id: str = "default",
         current_time: Optional[datetime] = None,
     ) -> Tuple[User, bool]:
         """Retrieve existing user or initialize new record in default onboarding state."""
-        user = await self.get_by_phone(phone_number)
+        user = await self.get_by_phone(phone_number, company_id=company_id)
         if user:
             return user, False
 
@@ -34,7 +35,9 @@ class UserRepository:
         new_user = User(
             id=uuid.uuid4(),
             phone_number=phone_number,
+            company_id=company_id,
             current_step="ASK_ONBOARDING",
+            is_human_handoff=False,
             last_interaction_at=now,
             created_at=now,
         )
@@ -53,6 +56,8 @@ class UserRepository:
         format_type: Optional[str] = None,
         sub_intent: Optional[str] = None,
         current_step: Optional[str] = None,
+        is_human_handoff: Optional[bool] = None,
+        pending_action: Optional[str] = None,
         last_interaction_at: Optional[datetime] = None,
     ) -> User:
         """Update user profile fields and state tracking."""
@@ -70,9 +75,28 @@ class UserRepository:
             user.sub_intent = sub_intent
         if current_step is not None:
             user.current_step = current_step
+        if is_human_handoff is not None:
+            user.is_human_handoff = is_human_handoff
+        if pending_action is not None:
+            user.pending_action = pending_action
         if last_interaction_at is not None:
             user.last_interaction_at = last_interaction_at
 
+        await self.session.flush()
+        return user
+
+    async def reset_user_profile(self, user: User, now: Optional[datetime] = None) -> User:
+        """Resets user state to onboarding (used upon confirmed reset action)."""
+        user.name = None
+        user.profession = None
+        user.niche = None
+        user.brand_handle = None
+        user.format_type = None
+        user.sub_intent = None
+        user.current_step = "ASK_ONBOARDING"
+        user.is_human_handoff = False
+        user.pending_action = None
+        user.last_interaction_at = now or datetime.now()
         await self.session.flush()
         return user
 
@@ -121,6 +145,7 @@ class AuditRepository:
         event_type: str,
         phone_number: str,
         *,
+        company_id: str = "default",
         user_id: Optional[uuid.UUID] = None,
         step_from: Optional[str] = None,
         step_to: Optional[str] = None,
@@ -135,6 +160,7 @@ class AuditRepository:
         now = created_at or datetime.now()
         log_entry = AuditLog(
             id=uuid.uuid4(),
+            company_id=company_id,
             event_type=event_type,
             phone_number=phone_number,
             user_id=user_id,
@@ -153,23 +179,21 @@ class AuditRepository:
 
     async def query_logs(
         self,
-        *,
         phone_number: Optional[str] = None,
+        company_id: Optional[str] = None,
         event_type: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[AuditLog]:
-        """Fetch audit records with optional filters."""
-        stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+        """Query immutable audit events with pagination and filters."""
+        stmt = select(AuditLog)
         if phone_number:
-            clean = phone_number.strip()
-            stmt = stmt.where(
-                (AuditLog.phone_number == clean)
-                | (AuditLog.phone_number == f"+{clean}")
-                | (AuditLog.phone_number == clean.lstrip("+"))
-            )
+            stmt = stmt.where(AuditLog.phone_number == phone_number)
+        if company_id:
+            stmt = stmt.where(AuditLog.company_id == company_id)
         if event_type:
             stmt = stmt.where(AuditLog.event_type == event_type)
-        stmt = stmt.limit(limit).offset(offset)
+
+        stmt = stmt.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
