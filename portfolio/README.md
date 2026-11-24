@@ -6,14 +6,12 @@ This folder contains high-resolution **4K Ultra HD (3840 x 2160, 16:9 ratio)** m
 
 ## Portfolio Gallery Showcase
 
-+----------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------+
-| File                                   | Purpose on Fiverr                                                                                                                                                     | Resolution        |
-+----------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------+
-| fiverr_1_cover_showcase.png            | Gig Thumbnail (Main Cover) - High-impact 3D smartphone frame with active WhatsApp conversation, architecture pills, and tech stack badges (LangGraph, Gemini 3.8).   | 3840 x 2160 (4K)  |
-| fiverr_2_interactive_onboarding.png    | Interactive Workflow (3 Phones) - Visual demonstration of the stateful onboarding: brand calibration, multi-format menu, and Smart Intent extraction.               | 3840 x 2160 (4K)  |
-| fiverr_3_neurocopy_delivery.png        | Automated Content Delivery - Complete Stories sequence generation with pattern interrupt hooks, scientific authority mechanisms, camera directions, and direct CTAs. | 3840 x 2160 (4K)  |
-| fiverr_4_whatsapp_lead_pitch.png       | B2B Sales & Objection Reframing - Direct WhatsApp sales conversation reframing the "no time" objection into an immediate 15-minute qualification call.               | 3840 x 2160 (4K)  |
-+----------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------+
+| File | Purpose on Fiverr | Resolution |
+| :--- | :--- | :--- |
+| `fiverr_1_cover_showcase.png` | Gig Thumbnail (Main Cover) - High-impact 3D smartphone frame with active WhatsApp conversation, architecture pills, and tech stack badges (LangGraph, Gemini 3.8). | 3840 x 2160 (4K) |
+| `fiverr_2_interactive_onboarding.png` | Interactive Workflow (3 Phones) - Visual demonstration of the stateful onboarding: brand calibration, multi-format menu, and Smart Intent extraction. | 3840 x 2160 (4K) |
+| `fiverr_3_neurocopy_delivery.png` | Automated Content Delivery - Complete Stories sequence generation with pattern interrupt hooks, scientific authority mechanisms, camera directions, and direct CTAs. | 3840 x 2160 (4K) |
+| `fiverr_4_whatsapp_lead_pitch.png` | B2B Sales & Objection Reframing - Direct WhatsApp sales conversation reframing the "no time" objection into an immediate 15-minute qualification call. | 3840 x 2160 (4K) |
 
 ---
 

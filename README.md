@@ -148,56 +148,31 @@ stateDiagram-v2
 
 ## Camadas de Seguranca e Engenharia Defensiva
 
-+---------------------------------------------------------------------------------------------------+
-| 1. SEGURANCA COGNITIVA (NVIDIA NeMo Guardrails & Heuristicas Compiladas)                          |
-+---------------------------------------------------------------------------------------------------+
-| - Inspecao em Sub-Milissegundo (<1ms): Regex pré-compiladas no arquivo guardrails_service.py       |
-|   bloqueando DAN Mode, Developer Mode, System Prompt Overrides e comandos destrutivos.            |
-| - Regras em Colang 1.0: Estrutura declarativa em app/guardrails/rails.co e config.yml.           |
-| - Output Rails Anti-Vazamento: Sanitizacao automatica de respostas contra exposicao de chaves     |
-|   Google/Gemini, OpenAI, tokens de acesso, URIs PostgreSQL e credenciais de cache Redis.          |
-| - Zero Falsos Positivos: Aprovacao irrestrita de solicitacoes legitimas de criacao de conteudo.   |
-+---------------------------------------------------------------------------------------------------+
+### 1. Seguranca Cognitiva (NVIDIA NeMo Guardrails & Heuristicas Compiladas)
+- **Inspecao em Sub-Milissegundo (<1ms)**: Expressoes regulares pre-compiladas no modulo `app/guardrails_service.py` bloqueando tentativas de DAN Mode, Developer Mode, substituição de System Prompt e injecoes SQL/comandos de sistema.
+- **Regras em Colang 1.0**: Estrutura declarativa de controle em `app/guardrails/rails.co` e `config.yml`.
+- **Output Rails Anti-Vazamento**: Sanitizacao automatica de respostas contra exposicao acidental de tokens de API (Gemini, Google, OpenAI, GitHub), strings de conexao PostgreSQL e URIs Redis.
+- **Zero Falsos Positivos**: Validacao com matriz de testes garantindo aprovacao integral de solicitacoes legitimas de geracao de conteudo.
 
-+---------------------------------------------------------------------------------------------------+
-| 2. SEGURANCA DE BORDA E CRIPTOGRAFIA                                                              |
-+---------------------------------------------------------------------------------------------------+
-| - Validacao em Tempo Constante: Uso de hmac.compare_digest em verify_webhook_secret para prevenir |
-|   vulnerabilidades de analise de canal lateral (Timing Attacks) em webhooks inbound.              |
-| - PBKDF2-HMAC-SHA256: Hashing de senhas e tokens com minimo de 600.000 iteracoes e salt de 16 B.  |
-| - Controle de Acesso Baseado em Papeis (RBAC): Protecao dos endpoints /audit/logs e /audit/stats  |
-|   exigindo credenciais administrativas (header X-Admin-Key ou Bearer Token).                      |
-+---------------------------------------------------------------------------------------------------+
+### 2. Seguranca de Borda e Criptografia
+- **Validacao em Tempo Constante**: Utilizacao de `hmac.compare_digest` na verificacao de assinaturas de webhooks de entrada, mitigando ataques de analise temporal (Timing Attacks).
+- **PBKDF2-HMAC-SHA256**: Hashing e derivacao de senhas com no minimo 600.000 iteracoes e salt criptografico de 16 bytes.
+- **Controle de Acesso Baseado em Papeis (RBAC)**: Protecao restrita de rotas administrativas e de auditoria (`/audit/logs`, `/audit/stats`) via autenticacao por header `X-Admin-Key` ou Bearer Token.
 
-+---------------------------------------------------------------------------------------------------+
-| 3. RESILIENCIA ANTI-RAJADA E CONTROLE DE CONCORRENCIA (Redis 7)                                   |
-+---------------------------------------------------------------------------------------------------+
-| - Deduplicacao Atomica (SET NX EX): Descarte com HTTP 200 de eventos repetidos em 5 minutos.      |
-| - Lock Distribuido Atomico via Lua Script: Travas por tenant e telefone com UUID token unico.     |
-|   Apenas o processo proprietario da trava pode desaloca-la, eliminando desincronizacao.          |
-| - Message Debouncer: Buffer inbound em Redis para consolidacao de mensagens fragmentadas de       |
-|   WhatsApp em rajada, proporcionando economia de ate 65% em tokens de processamento LLM.          |
-| - Descarte de Mensagens Improprias: Rejeicao automatica de fromMe=True e grupos (@g.us).          |
-+---------------------------------------------------------------------------------------------------+
+### 3. Resiliencia Anti-Rajada e Controle de Concorrencia (Redis 7)
+- **Deduplicacao Atomica (SET NX EX)**: Descarte transparente com HTTP 200 de eventos repetidos na janela de 5 minutos com base em `message_id`.
+- **Lock Distribuido Atomico via Script Lua**: Bloqueio concorrente por tenant e telefone com UUID exclusivo de liberacao, impedindo remocoes indevidas por concorrencia cruzada.
+- **Message Debouncer**: Buffer de entrada em Redis para consolidacao de mensagens fragmentadas de WhatsApp em rajada, proporcionando reducao de ate 65% no consumo de tokens LLM.
+- **Descarte de Mensagens Nao Operacionais**: Ignora automaticamente mensagens originadas pelo proprio bot (`fromMe: true`) e mensagens de grupos (`@g.us`).
 
-+---------------------------------------------------------------------------------------------------+
-| 4. HUMAN-IN-THE-LOOP (HITL) ADAPTATIVO E CONTROLE DE ACOES CRITICAS                               |
-+---------------------------------------------------------------------------------------------------+
-| - Transbordo Humano Prioritario (<5ms): Deteccao de pedidos de atendimento humano, interrupcao da |
-|   maquina cognitiva e gravacao de is_human_handoff=True para suporte operacional imediato.        |
-| - Prevencao de Acoes Cegas (Pre-Confirmation): Retencao de comandos irreversiveis (ex: reset de   |
-|   conta ou delecao de dados) em estado pendente, exigindo confirmacao expressa ('SIM'/'NAO').     |
-| - Cancelamento Seguro: Reversao do fluxo sem modificacao de banco caso o usuario desista da acao. |
-+---------------------------------------------------------------------------------------------------+
+### 4. Human-in-the-Loop (HITL) Adaptativo e Controle de Acoes Criticas
+- **Transbordo Humano Prioritario (<5ms)**: Interrupcao imediata do fluxo cognitivo ao detectar intencoes de atendimento humano, ativando `is_human_handoff = True` para intervencao operacional.
+- **Confirmacao Previa de Acoes Destrutivas**: Retencao de comandos irreversiveis (como reset de cadastro e historico) em estado pendente, exigindo confirmacao expressa (`SIM`/`NAO`).
+- **Cancelamento Seguro**: Reversao imediata do fluxo sem alteracao de estado caso o usuario decline a acao.
 
-+---------------------------------------------------------------------------------------------------+
-| 5. ISOLAMENTO MULTI-TENANT E AUDITORIA IMUTAVEL                                                   |
-+---------------------------------------------------------------------------------------------------+
-| - Segregacao Logica por company_id: Particionamento estrito de usuarios, mensagens, base RAG e    |
-|   travas de execucao concorrente.                                                                 |
-| - Trilha de Auditoria Relacional: Gravacao de eventos estruturados em tabela audit_logs e arquivo |
-|   rotativo logs/audit.log com identificacao de latencia, status e payloads de execucao.           |
-+---------------------------------------------------------------------------------------------------+
+### 5. Isolamento Multi-Tenant e Auditoria Imutavel
+- **Segregacao Logica por company_id**: Particionamento estrito de usuarios, mensagens, base vetorial RAG e travas de execucao concorrente.
+- **Trilha de Auditoria Relacional**: Gravacao estruturada de eventos com latencia, status e payloads em banco relacional e arquivo rotativo (`logs/audit.log`).
 
 ---
 
@@ -295,19 +270,14 @@ Resultado da execucao:
 ```
 
 Matriz de Cobertura de Testes:
-+-----------------------------------+----------+---------------------------------------------------------+
-| Modulo de Teste                   | Testes   | Escopo de Validacao                                     |
-+-----------------------------------+----------+---------------------------------------------------------+
-| test_guardrails_security.py       | 24 casos | Jailbreak (DAN, Dev Mode), Prompt Injection, SQLi,     |
-|                                   |          | Vazamento de Chaves de API e Zero Falsos Positivos      |
-| test_production_hardening.py      | 6 casos  | HMAC Timing Attacks, PBKDF2 >=600k iters, RBAC Admin,   |
-|                                   |          | Descarte de grupos, Trava Lua e Message Debouncer       |
-| test_harness.py                   | 11 casos | Onboarding, Concorrencia Redis, Dedup, RAG, Webhooks,   |
-|                                   |          | Human Handoff (<5ms) e Confirmacao Previa de Acoes      |
-| test_neurocopy_situations.py      | 5 casos  | Situacoes reais de negocio e geracao de formatos        |
-+-----------------------------------+----------+---------------------------------------------------------+
-| TOTAL                             | 55 casos | 100% de Aprovacao em Ambiente Deterministico            |
-+-----------------------------------+----------+---------------------------------------------------------+
+
+| Modulo de Teste | Casos | Escopo de Validacao |
+| :--- | :---: | :--- |
+| `tests/test_guardrails_security.py` | 24 | Protecao contra Jailbreak (DAN, Dev Mode), Prompt Injection, SQLi, Vazamento de Chaves e Zero Falsos Positivos |
+| `tests/test_production_hardening.py` | 6 | HMAC Timing Attacks, PBKDF2 >=600k iters, RBAC Admin, Descarte de grupos, Trava Lua e Message Debouncer |
+| `tests/test_harness.py` | 11 | Onboarding, Concorrencia Redis, Dedup, RAG, Webhooks, Human Handoff (<5ms) e Confirmacao Previa de Acoes |
+| `tests/test_neurocopy_situations.py` | 5 | Situacoes reais de negocio e geracao de formatos persuasivos |
+| **Total** | **55 casos** | **100% de Aprovacao em Ambiente Deterministico** |
 
 ### 2. Prompt Evals e Quality Gate Pre-Deploy
 
@@ -326,14 +296,11 @@ Criterio de Aprovacao no Quality Gate:
 
 Resultado da Ultima Avaliacao:
 ```
-+--------------------------------------------------------------------+
-| RESULTADO FINAL DO QUALITY GATE PRE-DEPLOY                         |
-+--------------------------------------------------------------------+
-| Cenarios Avaliados: 10                                             |
-| Score Global:       100.00% (Limiar: >= 90.00%)                    |
-| Falhas Criticas:    0 (Limiar: 0)                                  |
-| Status:             LIBERADO PARA DEPLOY                           |
-+--------------------------------------------------------------------+
+RESULTADO DO QUALITY GATE PRE-DEPLOY:
+- Cenarios Avaliados: 10
+- Score Global:       100.00% (Limiar: >= 90.00%)
+- Falhas Criticas:    0 (Limiar: 0)
+- Status:             LIBERADO PARA DEPLOY
 ```
 
 ---
