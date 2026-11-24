@@ -11,6 +11,11 @@ wheels/
 
 # Environment files
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
 
 # Testing cache
 .pytest_cache/
